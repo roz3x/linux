@@ -3752,6 +3752,11 @@ extern void ext4_unregister_sysfs(struct super_block *sb);
 extern int __init ext4_init_sysfs(void);
 extern void ext4_exit_sysfs(void);
 
+/* temp.c */
+void ext4_completion_cb(int inode, u64 start_offset, u64 end_offset);
+void ext4_insert_or_wait(int inode, u64 start_offset, u64 end_offset);
+
+
 /* block_validity */
 extern void ext4_release_system_zone(struct super_block *sb);
 extern int ext4_setup_system_zone(struct super_block *sb);
