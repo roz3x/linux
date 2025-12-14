@@ -15,6 +15,8 @@ struct ext4_range_node {
 };
 
 
+static atomic_t tree_size = ATOMIC_INIT(0);
+
 static struct rb_root root = RB_ROOT;
 static struct mutex lock;
 
@@ -46,10 +48,43 @@ static struct ext4_range_node* find_first_le(int inode, u64 offset) {
 			}
 		}
 	}
-	best->refs++;
+	/* TODO: refcounting the returns perhaps ??? */
 	return best;
 }
 
+static void insert_exact(struct ext4_range_node *new_node){
+	struct rb_node **new = &root.rb_node;
+	struct rb_node *parent = NULL;
+	unsigned int long long offset = new_node->offset;
+	unsigned int long long inode = new_node->inode;
+
+	while (*new) {
+		struct ext4_range_node *this = rb_entry(*new, struct ext4_range_node, rb);
+		parent = *new;
+
+		if (inode == this->inode) {
+			if (offset == this->offset) {
+				panic("this should be impossible ***\n");
+				return;
+			} else if (offset < this->inode) {
+				new = &((*new)->rb_left);
+			} else {
+				new = &((*new)->rb_right);
+			}
+		} else {
+			if (inode < this->inode) {
+				new = &((*new)->rb_left);
+			} else {
+				new = &((*new)->rb_right);
+			}
+		}
+	}
+
+	rb_link_node(&new_node->rb, parent, new);
+	rb_insert_color(&new_node->rb, &root);
+	atomic_inc(&tree_size);
+
+}
 static void delete_exact(int inode, u64 offset) {
 
 	struct rb_node **new = &root.rb_node;
@@ -77,6 +112,7 @@ static void delete_exact(int inode, u64 offset) {
 			}
 		}
 	}
+	atomic_dec(&tree_size);
 	return;
 }
 
@@ -84,7 +120,9 @@ void ext4_completion_cb(int inode, u64 start_offset, u64 end_offset) {
 
 	mutex_lock(&lock);
 
+	printk("[shivang] tree_size : %d\n", atomic_read(&tree_size));
 	delete_exact(inode, start_offset);
+	printk("[shivang] tree_size : %d\n", atomic_read(&tree_size));
 	delete_exact(inode, start_offset);
 
 	mutex_unlock(&lock);
@@ -103,6 +141,7 @@ void ext4_insert_or_wait(int inode, u64 start_offset,
 	 * need to answer question, how much DIO's can be run at same time on a disk?
 	 */
 
+	printk("[shivang] tree_size : %d\n", atomic_read(&tree_size));
 
 	node_start = (struct ext4_range_node*) kmalloc(sizeof(struct ext4_range_node*), GFP_KERNEL);
 	node_end = (struct ext4_range_node*) kmalloc(sizeof(struct ext4_range_node*), GFP_KERNEL);
@@ -135,15 +174,22 @@ void ext4_insert_or_wait(int inode, u64 start_offset,
 		if (best_start != NULL && best_start->inode == node_start->inode
 			&& (best_start->offset == node_start->offset || best_start->value == BOUNDRY_START)) {
 			/* we wait for best_start's lock */
+			schedule();
 			continue;
 		}
 
 		if (best_end != NULL && best_end->inode == node_end->inode
 			&& (best_end->value == BOUNDRY_START || best_end->offset >= node_start->offset )) {
 			/* we wait for best_end's lock */
+			schedule();
 			continue;
 		}
+
 		/* there is no overlap after this point */
+		mutex_lock(&lock);
+		insert_exact(node_start);
+		insert_exact(node_end);
+		mutex_unlock(&lock);
 		break;
 	}
 
