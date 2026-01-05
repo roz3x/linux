@@ -126,7 +126,7 @@ __secondary_hold_acknowledge:
 #ifdef CONFIG_RELOCATABLE_TEST
 #define RUN_AT_LOAD_DEFAULT 1		/* Test relocation, do not copy to 0 */
 #else
-#define RUN_AT_LOAD_DEFAULT 0x72756e30  /* "run0" -- relocate to 0 by default */
+#define RUN_AT_LOAD_DEFAULT 1  /* "run0" -- relocate to 0 by default */
 #endif
 
 	/* Do not move this variable as kexec-tools knows about it. */
@@ -624,13 +624,45 @@ __boot_from_prom:
 	.previous
 
 __after_prom_start:
+	/* load the value 1G into r3 */
+	lis	r3, 0xC000
+	ori	r3, r3, 0x0000
+	sldi	r3, r3, 32
+	oris	r3, r3, 0x4000
+	ori	r3, r3, 0x0000
+	mr	r17, r3
+
+	/* load current kernel start to r4 */
+	mr	r4, r26
+
+	/* set copy size to 500M */
+	lis	r5, 0x1f40
+	oris	r5, r5, 0x0000
+
+	/* set copy_start to zero */
+	li	r6, 0x0
+
+	/* moving kernel to 1G */
+	bl	copy_and_flush
+
+
+	lis	r3, 0xC000
+	ori	r3, r3, 0x0000
+	sldi	r3, r3, 32
+	oris	r3, r3, 0x4000
+	ori	r3, r3, 0xe0ec
+	mr	r26, r17
+
+	mtlr	r3
+	blr
+
 #ifdef CONFIG_RELOCATABLE
 	/* process relocations for the final address of the kernel */
 	lwz	r7,(FIXED_SYMBOL_ABS_ADDR(__run_at_load))(r26)
 	cmplwi	cr0,r7,1	/* flagged to stay where we are ? */
 	mr	r25,r26		/* then use current kernel base */
-	beq	1f
-	LOAD_REG_IMMEDIATE(r25, PAGE_OFFSET) /* else use static kernel base */
+	// beq	1f
+	// LOAD_REG_IMMEDIATE(r25, PAGE_OFFSET) /* else use static kernel base */
 1:	mr	r3,r25
 	bl	relocate
 #if defined(CONFIG_PPC_BOOK3E_64)
