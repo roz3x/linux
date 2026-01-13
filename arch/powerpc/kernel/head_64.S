@@ -626,9 +626,9 @@ __boot_from_prom:
 __after_prom_start:
 	/* load the value 1G into r3 */
 	lis	r3, 0xC000
-	ori	r3, r3, 0x0000
+	ori	r3, r3, 0x0002
 	sldi	r3, r3, 32
-	oris	r3, r3, 0x4000
+	oris	r3, r3, 0x0000
 	ori	r3, r3, 0x0000
 	mr	r17, r3
 
@@ -647,9 +647,9 @@ __after_prom_start:
 
 
 	lis	r3, 0xC000
-	ori	r3, r3, 0x0000
+	ori	r3, r3, 0x0002
 	sldi	r3, r3, 32
-	oris	r3, r3, 0x4000
+	oris	r3, r3, 0x0000
 	ori	r3, r3, 0xe0ec
 	mr	r26, r17
 
