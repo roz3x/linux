@@ -113,7 +113,7 @@ __enter_rtas:
 	 * from the saved MSR value and insert into the value RTAS will use.
 	 */
 	extrdi	r0, r6, 1, 63 - MSR_HV_LG
-	LOAD_REG_IMMEDIATE(r6, MSR_ME | MSR_RI)
+	LOAD_REG_IMMEDIATE(r6, MSR_ME | MSR_RI | MSR_SF)
 	insrdi	r6, r0, 1, 63 - MSR_HV_LG
 
 	li      r0,0
