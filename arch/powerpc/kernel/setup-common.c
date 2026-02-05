@@ -901,6 +901,22 @@ static void __init smp_setup_pacas(void)
 }
 #endif
 
+
+static char excpt_range[PAGE_SIZE] __aligned(PAGE_SIZE);
+
+void custom_excpt_plate_setup(void);
+void custom_excpt_plate_setup(void) {
+
+	memcpy(excpt_range, (void*)0xc000000000000000UL, PAGE_SIZE);
+
+	printk("[shivang] custom_excpt setup is done here %llx\n", (u64)excpt_range);
+	int ret = map_kernel_page(0xc000000000000000UL, ((u64)excpt_range) ^ 0xc000000000000000, PAGE_KERNEL_X);
+	printk("[shivang] ret: %d\n", ret);
+	u32 val = *(u32*)(0xc000000000000000UL);
+	printk("[shivang] val: %x\n", val);
+
+}
+
 /*
  * Called into from start_kernel this initializes memblock, which is used
  * to manage page allocation until mem_init is called.
@@ -1018,6 +1034,7 @@ void __init setup_arch(char **cmdline_p)
 	/* Initialize the MMU context management stuff. */
 	mmu_context_init();
 
+	custom_excpt_plate_setup();
 	/* Interrupt code needs to be 64K-aligned. */
 	if (IS_ENABLED(CONFIG_PPC64) && (unsigned long)_stext & 0xffff)
 		panic("Kernelbase not 64K-aligned (0x%lx)!\n",
