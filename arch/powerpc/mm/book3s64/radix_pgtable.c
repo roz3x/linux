@@ -61,6 +61,24 @@ static __ref void *early_alloc_pgtable(unsigned long size, int nid,
 	return ptr;
 }
 
+static void check_mapping(unsigned long ea) {
+	
+	pgd_t *pgdp;
+	p4d_t *p4dp;
+	pud_t *pudp;
+	pmd_t *pmdp;
+	pte_t *ptep;
+
+	pgdp = pgd_offset_k(ea);
+	p4dp = p4d_offset(pgdp, ea);
+	pudp = pud_offset(p4dp, ea);
+	pmdp = pmd_offset(pudp, ea);
+	ptep = pte_offset_kernel(pmdp, ea);
+
+	printk("mappping %lx -> %lx\n", ea, pte_pfn(*ptep));
+	return;
+}
+
 /*
  * When allocating pud or pmd pointers, we allocate a complete page
  * of PAGE_SIZE rather than PUD_TABLE_SIZE or PMD_TABLE_SIZE. This
@@ -74,6 +92,8 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 			  int nid,
 			  unsigned long region_start, unsigned long region_end)
 {
+	// pa += 4ull * 1024 * 1024 * 1024;
+
 	unsigned long pfn = pa >> PAGE_SHIFT;
 	pgd_t *pgdp;
 	p4d_t *p4dp;
@@ -141,9 +161,12 @@ static int __map_kernel_page(unsigned long ea, unsigned long pa,
 	BUILD_BUG_ON(RADIX_KERN_MAP_SIZE != (1UL << MAX_EA_BITS_PER_CONTEXT));
 #endif
 
-	if (unlikely(!slab_is_available()))
-		return early_map_kernel_page(ea, pa, flags, map_page_size,
+	if (unlikely(!slab_is_available())) {
+		int ret =  early_map_kernel_page(ea, pa, flags, map_page_size,
 						nid, region_start, region_end);
+		check_mapping(ea);
+		return ret;
+	}
 
 	/*
 	 * Should make page table allocation functions be able to take a

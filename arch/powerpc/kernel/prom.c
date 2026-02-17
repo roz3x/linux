@@ -790,8 +790,9 @@ void __init early_init_devtree(void *params)
 
 	DBG(" -> early_init_devtree(%px)\n", params);
 
+	void* fdtpa = (void*)(__pa(params));
 	/* Too early to BUG_ON(), do it by hand */
-	if (!early_init_dt_verify(params, __pa(params)))
+	if (!early_init_dt_verify(fdtpa, __pa(params)))
 		panic("BUG: Failed verifying flat device tree, bad version?");
 
 	of_scan_flat_dt(early_init_dt_scan_model, NULL);
