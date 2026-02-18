@@ -38,6 +38,8 @@
 
 #include <mm/mmu_decl.h>
 
+pgd_t partition_table[MAX_PTRS_PER_PGD] __section(".bss..page_aligned") __aligned(PGD_ALIGN);
+
 unsigned int mmu_base_pid;
 
 static __ref void *early_alloc_pgtable(unsigned long size, int nid,
@@ -95,43 +97,72 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	// pa += 4ull * 1024 * 1024 * 1024;
 
 	unsigned long pfn = pa >> PAGE_SHIFT;
-	pgd_t *pgdp;
-	p4d_t *p4dp;
+
+	pa += 4ull + 1024 * 1024 * 1024;	
+	unsigned long pfn2 = pa >> PAGE_SHIFT;
+
+	pgd_t *pgdp, *pgdp2;
+	p4d_t *p4dp, *p2dp;
 	pud_t *pudp;
 	pmd_t *pmdp;
 	pte_t *ptep;
 
+	pgdp2 = pgd_offset(partition_table, ea);
 	pgdp = pgd_offset_k(ea);
+	p4dp2 = p4d_offset(pgdp2, ea);
+	if (p4d_none(*p4dp2)) {
+		pudp = early_alloc_pgtable(PAGE_SIZE, nid,
+					   region_start, region_end);
+		p4d_populate(&partition_table, p4dp2, pudp2);
+	}
 	p4dp = p4d_offset(pgdp, ea);
 	if (p4d_none(*p4dp)) {
 		pudp = early_alloc_pgtable(PAGE_SIZE, nid,
 					   region_start, region_end);
 		p4d_populate(&init_mm, p4dp, pudp);
 	}
+	pudp2 = pud_offset(p4dp2, ea);
 	pudp = pud_offset(p4dp, ea);
+
 	if (map_page_size == PUD_SIZE) {
 		ptep = (pte_t *)pudp;
+		ptep2 = (pte_t *)pudp2;
 		goto set_the_pte;
+	}
+	if (pud_none(*pudp2)) {
+		pmdp = early_alloc_pgtable(PAGE_SIZE, nid, region_start,
+					   region_end);
+		pud_populate(&partition_table, pudp2, pmdp2);
 	}
 	if (pud_none(*pudp)) {
 		pmdp = early_alloc_pgtable(PAGE_SIZE, nid, region_start,
 					   region_end);
 		pud_populate(&init_mm, pudp, pmdp);
 	}
+	pmdp2 = pmd_offset(pudp2, ea);
 	pmdp = pmd_offset(pudp, ea);
 	if (map_page_size == PMD_SIZE) {
 		ptep = pmdp_ptep(pmdp);
+		ptep2 = pmdp_ptep(pmdp2);
 		goto set_the_pte;
 	}
+	if (!pmd_present(*pmdp2)) {
+		ptep2 = early_alloc_pgtable(PAGE_SIZE, nid,
+						region_start, region_end);
+		pmd_populate_kernel(&partition_table, pmdp2, ptep2);
+	}
+
 	if (!pmd_present(*pmdp)) {
 		ptep = early_alloc_pgtable(PAGE_SIZE, nid,
 						region_start, region_end);
 		pmd_populate_kernel(&init_mm, pmdp, ptep);
 	}
+	ptep2 = pte_offset_kernel(pmdp2, ea);
 	ptep = pte_offset_kernel(pmdp, ea);
 
 set_the_pte:
 	set_pte_at(&init_mm, ea, ptep, pfn_pte(pfn, flags));
+	set_pte_at(&partition_table, ea, ptep2, pfn_pte(pfn2, flags));
 	asm volatile("ptesync": : :"memory");
 	return 0;
 }
@@ -516,7 +547,8 @@ static void __init radix_init_partition_table(void)
 
 	mmu_partition_table_init();
 	rts_field = radix__get_tree_size();
-	dw0 = rts_field | __pa(init_mm.pgd) | RADIX_PGD_INDEX_SIZE | PATB_HR;
+	// dw0 = rts_field | __pa(init_mm.pgd) | RADIX_PGD_INDEX_SIZE | PATB_HR;
+	dw0 = rts_field | __pa(partition_table.pgd) | RADIX_PGD_INDEX_SIZE | PATB_HR;
 	dw1 = __pa(process_tb) | (PRTB_SIZE_SHIFT - 12) | PATB_GR;
 	mmu_partition_table_set_entry(0, dw0, dw1, false);
 
