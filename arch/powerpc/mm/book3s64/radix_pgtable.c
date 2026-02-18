@@ -38,7 +38,9 @@
 
 #include <mm/mmu_decl.h>
 
-pgd_t partition_table[MAX_PTRS_PER_PGD] __section(".bss..page_aligned") __aligned(PGD_ALIGN);
+#define PGD_ALIGN (sizeof(pgd_t) * MAX_PTRS_PER_PGD)
+pgd_t partition_table_all[MAX_PTRS_PER_PGD] __section(".bss..page_aligned") __aligned(PGD_ALIGN);
+pgd_t *partition_table = &partition_table_all[0];
 
 unsigned int mmu_base_pid;
 
@@ -63,24 +65,6 @@ static __ref void *early_alloc_pgtable(unsigned long size, int nid,
 	return ptr;
 }
 
-static void check_mapping(unsigned long ea) {
-	
-	pgd_t *pgdp;
-	p4d_t *p4dp;
-	pud_t *pudp;
-	pmd_t *pmdp;
-	pte_t *ptep;
-
-	pgdp = pgd_offset_k(ea);
-	p4dp = p4d_offset(pgdp, ea);
-	pudp = pud_offset(p4dp, ea);
-	pmdp = pmd_offset(pudp, ea);
-	ptep = pte_offset_kernel(pmdp, ea);
-
-	printk("mappping %lx -> %lx\n", ea, pte_pfn(*ptep));
-	return;
-}
-
 /*
  * When allocating pud or pmd pointers, we allocate a complete page
  * of PAGE_SIZE rather than PUD_TABLE_SIZE or PMD_TABLE_SIZE. This
@@ -94,26 +78,24 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 			  int nid,
 			  unsigned long region_start, unsigned long region_end)
 {
-	// pa += 4ull * 1024 * 1024 * 1024;
-
 	unsigned long pfn = pa >> PAGE_SHIFT;
 
 	pa += 4ull + 1024 * 1024 * 1024;	
 	unsigned long pfn2 = pa >> PAGE_SHIFT;
 
 	pgd_t *pgdp, *pgdp2;
-	p4d_t *p4dp, *p2dp;
-	pud_t *pudp;
-	pmd_t *pmdp;
-	pte_t *ptep;
+	p4d_t *p4dp, *p4dp2;
+	pud_t *pudp, *pudp2;
+	pmd_t *pmdp, *pmdp2;
+	pte_t *ptep, *ptep2;
 
-	pgdp2 = pgd_offset(partition_table, ea);
+	pgdp2 = pgd_offset_pgd(partition_table, ea);
 	pgdp = pgd_offset_k(ea);
 	p4dp2 = p4d_offset(pgdp2, ea);
 	if (p4d_none(*p4dp2)) {
-		pudp = early_alloc_pgtable(PAGE_SIZE, nid,
+		pudp2 = early_alloc_pgtable(PAGE_SIZE, nid,
 					   region_start, region_end);
-		p4d_populate(&partition_table, p4dp2, pudp2);
+		p4d_populate(&init_mm, p4dp2, pudp2);
 	}
 	p4dp = p4d_offset(pgdp, ea);
 	if (p4d_none(*p4dp)) {
@@ -130,9 +112,9 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 		goto set_the_pte;
 	}
 	if (pud_none(*pudp2)) {
-		pmdp = early_alloc_pgtable(PAGE_SIZE, nid, region_start,
+		pmdp2 = early_alloc_pgtable(PAGE_SIZE, nid, region_start,
 					   region_end);
-		pud_populate(&partition_table, pudp2, pmdp2);
+		pud_populate(&init_mm, pudp2, pmdp2);
 	}
 	if (pud_none(*pudp)) {
 		pmdp = early_alloc_pgtable(PAGE_SIZE, nid, region_start,
@@ -149,7 +131,7 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	if (!pmd_present(*pmdp2)) {
 		ptep2 = early_alloc_pgtable(PAGE_SIZE, nid,
 						region_start, region_end);
-		pmd_populate_kernel(&partition_table, pmdp2, ptep2);
+		pmd_populate_kernel(&init_mm, pmdp2, ptep2);
 	}
 
 	if (!pmd_present(*pmdp)) {
@@ -162,7 +144,7 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 
 set_the_pte:
 	set_pte_at(&init_mm, ea, ptep, pfn_pte(pfn, flags));
-	set_pte_at(&partition_table, ea, ptep2, pfn_pte(pfn2, flags));
+	set_pte_at(&init_mm, ea, ptep2, pfn_pte(pfn2, flags));
 	asm volatile("ptesync": : :"memory");
 	return 0;
 }
@@ -192,12 +174,9 @@ static int __map_kernel_page(unsigned long ea, unsigned long pa,
 	BUILD_BUG_ON(RADIX_KERN_MAP_SIZE != (1UL << MAX_EA_BITS_PER_CONTEXT));
 #endif
 
-	if (unlikely(!slab_is_available())) {
-		int ret =  early_map_kernel_page(ea, pa, flags, map_page_size,
+	if (unlikely(!slab_is_available()))
+		return early_map_kernel_page(ea, pa, flags, map_page_size,
 						nid, region_start, region_end);
-		check_mapping(ea);
-		return ret;
-	}
 
 	/*
 	 * Should make page table allocation functions be able to take a
@@ -522,7 +501,8 @@ static void __init radix_init_pgtable(void)
 	 * Fill in the process table.
 	 */
 	rts_field = radix__get_tree_size();
-	process_tb->prtb0 = cpu_to_be64(rts_field | __pa(init_mm.pgd) | RADIX_PGD_INDEX_SIZE);
+	// process_tb->prtb0 = cpu_to_be64(rts_field | __pa(init_mm.pgd) | RADIX_PGD_INDEX_SIZE);
+	process_tb->prtb0 = cpu_to_be64(rts_field | __pa(&partition_table_all[0]) | RADIX_PGD_INDEX_SIZE);
 
 	/*
 	 * The init_mm context is given the first available (non-zero) PID,
@@ -547,8 +527,8 @@ static void __init radix_init_partition_table(void)
 
 	mmu_partition_table_init();
 	rts_field = radix__get_tree_size();
-	// dw0 = rts_field | __pa(init_mm.pgd) | RADIX_PGD_INDEX_SIZE | PATB_HR;
-	dw0 = rts_field | __pa(partition_table.pgd) | RADIX_PGD_INDEX_SIZE | PATB_HR;
+	dw0 = rts_field | __pa(init_mm.pgd) | RADIX_PGD_INDEX_SIZE | PATB_HR;
+	// dw0 = rts_field | __pa(&partition_table_all[0]) | RADIX_PGD_INDEX_SIZE | PATB_HR;
 	dw1 = __pa(process_tb) | (PRTB_SIZE_SHIFT - 12) | PATB_GR;
 	mmu_partition_table_set_entry(0, dw0, dw1, false);
 
