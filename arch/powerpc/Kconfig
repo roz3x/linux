@@ -1330,10 +1330,10 @@ if PPC64
 # This value must have zeroes in the bottom 60 bits otherwise lots will break
 config PAGE_OFFSET
 	hex
-	default "0xc000000000000000"
+	default "0x0000000000000000"
 config KERNEL_START
 	hex
-	default "0xc000000000000000"
+	default "0x0000000000000000"
 config PHYSICAL_START
 	hex
 	default "0x00000000"
