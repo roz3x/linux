@@ -101,14 +101,19 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	pmd_t *pmdp;
 	pte_t *ptep;
 
+	unsigned long hrmor = mfspr(SPRN_HRMOR);
 	pgdp = pgd_offset_k(ea);
 	p4dp = p4d_offset(pgdp, ea);
 	if (p4d_none(*p4dp)) {
 		pudp = early_alloc_pgtable(PAGE_SIZE, nid,
 					   region_start, region_end);
+
+		pudp = (pud_t*)((unsigned long)pudp | hrmor); /* apply */
 		p4d_populate(&init_mm, p4dp, pudp);
 	}
 	pudp = pud_offset(p4dp, ea);
+	pudp = (pud_t*)((unsigned long)pudp & ~hrmor); /* remove */
+
 	if (map_page_size == PUD_SIZE) {
 		ptep = (pte_t *)pudp;
 		goto set_the_pte;
@@ -116,9 +121,12 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	if (pud_none(*pudp)) {
 		pmdp = early_alloc_pgtable(PAGE_SIZE, nid, region_start,
 					   region_end);
+		pmdp = (pmd_t*)((unsigned long)pmdp | hrmor); /* apply */
 		pud_populate(&init_mm, pudp, pmdp);
 	}
 	pmdp = pmd_offset(pudp, ea);
+	pmdp = (pmd_t*)((unsigned long)pmdp & ~hrmor); /* remove */
+	
 	if (map_page_size == PMD_SIZE) {
 		ptep = pmdp_ptep(pmdp);
 		goto set_the_pte;
@@ -126,12 +134,15 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	if (!pmd_present(*pmdp)) {
 		ptep = early_alloc_pgtable(PAGE_SIZE, nid,
 						region_start, region_end);
+		ptep = (pte_t*)((unsigned long)ptep | hrmor); /* apply */
 		pmd_populate_kernel(&init_mm, pmdp, ptep);
 	}
 	ptep = pte_offset_kernel(pmdp, ea);
+	ptep = (pte_t*)((unsigned long)ptep & ~hrmor); /* remove */
 
 set_the_pte:
-	set_pte_at(&init_mm, ea, ptep, pfn_pte(pfn, flags));
+#define KB 1024
+	set_pte_at(&init_mm, ea, ptep, pfn_pte(pfn + hrmor/(64*KB), flags));
 	asm volatile("ptesync": : :"memory");
 	return 0;
 }
@@ -438,6 +449,10 @@ static inline phys_addr_t alloc_kfence_pool(void) { return 0; }
 static inline void map_kfence_pool(phys_addr_t kfence_pool) { }
 #endif
 
+static void printk_custom_ll(volatile const char* str, volatile unsigned long val) {
+	printk(str, val);
+}
+
 static void __init radix_init_pgtable(void)
 {
 	phys_addr_t kfence_pool;
@@ -491,7 +506,8 @@ static void __init radix_init_pgtable(void)
 	 * Fill in the process table.
 	 */
 	rts_field = radix__get_tree_size();
-	process_tb->prtb0 = cpu_to_be64(rts_field | __pa(init_mm.pgd) | RADIX_PGD_INDEX_SIZE);
+	process_tb->prtb0 = cpu_to_be64(rts_field | __pa(init_mm.pgd) | mfspr(SPRN_HRMOR) | RADIX_PGD_INDEX_SIZE);
+	printk_custom_ll("init.pgd?", __pa(init_mm.pgd));
 
 	/*
 	 * The init_mm context is given the first available (non-zero) PID,
@@ -516,8 +532,10 @@ static void __init radix_init_partition_table(void)
 
 	mmu_partition_table_init();
 	rts_field = radix__get_tree_size();
-	dw0 = rts_field | __pa(init_mm.pgd) | RADIX_PGD_INDEX_SIZE | PATB_HR;
-	dw1 = __pa(process_tb) | (PRTB_SIZE_SHIFT - 12) | PATB_GR;
+	dw0 = rts_field | __pa(init_mm.pgd)  | mfspr(SPRN_HRMOR) | RADIX_PGD_INDEX_SIZE | PATB_HR;
+	printk_custom_ll("dw0", dw0);
+	dw1 = __pa(process_tb) | mfspr(SPRN_HRMOR) | (PRTB_SIZE_SHIFT - 12) | PATB_GR;
+	printk_custom_ll("dw1", dw1);
 	mmu_partition_table_set_entry(0, dw0, dw1, false);
 
 	pr_info("Initializing Radix MMU\n");

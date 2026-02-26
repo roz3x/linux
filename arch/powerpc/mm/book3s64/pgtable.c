@@ -323,7 +323,8 @@ void __init mmu_partition_table_init(void)
 
 	/* Initialize the Partition Table with no entries */
 	partition_tb = memblock_alloc_or_panic(patb_size, patb_size);
-	ptcr = __pa(partition_tb) | (PATB_SIZE_SHIFT - 12);
+	ptcr = __pa(partition_tb) | mfspr(SPRN_HRMOR) | (PATB_SIZE_SHIFT - 12);
+
 	set_ptcr_when_no_uv(ptcr);
 	powernv_set_nmmu_ptcr(ptcr);
 }
