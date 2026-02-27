@@ -40,6 +40,10 @@
 
 unsigned int mmu_base_pid;
 
+static void printk_custom_ll(volatile const char* str, volatile unsigned long val) {
+	printk(str, val);
+}
+
 static __ref void *early_alloc_pgtable(unsigned long size, int nid,
 			unsigned long region_start, unsigned long region_end)
 {
@@ -79,6 +83,7 @@ static void check_mapping(unsigned long ea) {
 	return;
 }
 
+unsigned long cmask = 0xc000000000000000;
 /*
  * When allocating pud or pmd pointers, we allocate a complete page
  * of PAGE_SIZE rather than PUD_TABLE_SIZE or PMD_TABLE_SIZE. This
@@ -108,11 +113,11 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 		pudp = early_alloc_pgtable(PAGE_SIZE, nid,
 					   region_start, region_end);
 
-		pudp = (pud_t*)((unsigned long)pudp | hrmor); /* apply */
+		pudp = (pud_t*)((unsigned long)pudp | hrmor | cmask); /* apply */
 		p4d_populate(&init_mm, p4dp, pudp);
 	}
 	pudp = pud_offset(p4dp, ea);
-	pudp = (pud_t*)((unsigned long)pudp & ~hrmor); /* remove */
+	pudp = (pud_t*)((unsigned long)pudp & ~hrmor & ~cmask); /* remove */
 
 	if (map_page_size == PUD_SIZE) {
 		ptep = (pte_t *)pudp;
@@ -121,11 +126,12 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	if (pud_none(*pudp)) {
 		pmdp = early_alloc_pgtable(PAGE_SIZE, nid, region_start,
 					   region_end);
-		pmdp = (pmd_t*)((unsigned long)pmdp | hrmor); /* apply */
+		pmdp = (pmd_t*)((unsigned long)pmdp | hrmor | cmask); /* apply */
 		pud_populate(&init_mm, pudp, pmdp);
+		pud_populate(&init_mm, pudp + 4, pmdp);
 	}
 	pmdp = pmd_offset(pudp, ea);
-	pmdp = (pmd_t*)((unsigned long)pmdp & ~hrmor); /* remove */
+	pmdp = (pmd_t*)((unsigned long)pmdp & ~hrmor & ~cmask); /* remove */
 	
 	if (map_page_size == PMD_SIZE) {
 		ptep = pmdp_ptep(pmdp);
@@ -134,11 +140,11 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	if (!pmd_present(*pmdp)) {
 		ptep = early_alloc_pgtable(PAGE_SIZE, nid,
 						region_start, region_end);
-		ptep = (pte_t*)((unsigned long)ptep | hrmor); /* apply */
+		ptep = (pte_t*)((unsigned long)ptep | hrmor | cmask); /* apply */
 		pmd_populate_kernel(&init_mm, pmdp, ptep);
 	}
 	ptep = pte_offset_kernel(pmdp, ea);
-	ptep = (pte_t*)((unsigned long)ptep & ~hrmor); /* remove */
+	ptep = (pte_t*)((unsigned long)ptep & ~hrmor & ~cmask); /* remove */
 
 set_the_pte:
 #define KB 1024
@@ -449,9 +455,6 @@ static inline phys_addr_t alloc_kfence_pool(void) { return 0; }
 static inline void map_kfence_pool(phys_addr_t kfence_pool) { }
 #endif
 
-static void printk_custom_ll(volatile const char* str, volatile unsigned long val) {
-	printk(str, val);
-}
 
 static void __init radix_init_pgtable(void)
 {
@@ -531,6 +534,9 @@ static void __init radix_init_partition_table(void)
 	unsigned long rts_field, dw0, dw1;
 
 	mmu_partition_table_init();
+
+	mtspr(SPRN_PID, 0);
+
 	rts_field = radix__get_tree_size();
 	dw0 = rts_field | __pa(init_mm.pgd)  | mfspr(SPRN_HRMOR) | RADIX_PGD_INDEX_SIZE | PATB_HR;
 	printk_custom_ll("dw0", dw0);
