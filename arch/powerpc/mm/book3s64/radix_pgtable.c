@@ -79,7 +79,7 @@ static void check_mapping(unsigned long ea) {
 	pmdp = pmd_offset(pudp, ea);
 	ptep = pte_offset_kernel(pmdp, ea);
 
-	printk("mappping %lx -> %lx\n", ea, pte_pfn(*ptep));
+	// printk("mappping %lx -> %lx\n", ea, pte_pfn(*ptep));
 	return;
 }
 

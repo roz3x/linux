@@ -1016,7 +1016,6 @@ start_here_multiplatform:
 	ld	r4,PACAKMSR(r13)
 	mtspr	SPRN_SRR0,r3
 	mtspr	SPRN_SRR1,r4
-	b  . 
 	RFI_TO_KERNEL
 	b	.	/* prevent speculative execution */
 
