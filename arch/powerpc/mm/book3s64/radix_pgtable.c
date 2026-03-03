@@ -509,8 +509,8 @@ static void __init radix_init_pgtable(void)
 	 * Fill in the process table.
 	 */
 	rts_field = radix__get_tree_size();
-	process_tb->prtb0 = cpu_to_be64(rts_field | __pa(init_mm.pgd) | mfspr(SPRN_HRMOR) | RADIX_PGD_INDEX_SIZE);
-	printk_custom_ll("init.pgd?", __pa(init_mm.pgd));
+	struct prtb_entry* self = process_tb + 1;
+	self->prtb0 = cpu_to_be64(rts_field | __pa(init_mm.pgd) | mfspr(SPRN_HRMOR) | RADIX_PGD_INDEX_SIZE);
 
 	/*
 	 * The init_mm context is given the first available (non-zero) PID,
@@ -535,13 +535,10 @@ static void __init radix_init_partition_table(void)
 
 	mmu_partition_table_init();
 
-	mtspr(SPRN_PID, 0);
 
 	rts_field = radix__get_tree_size();
 	dw0 = rts_field | __pa(init_mm.pgd)  | mfspr(SPRN_HRMOR) | RADIX_PGD_INDEX_SIZE | PATB_HR;
-	printk_custom_ll("dw0", dw0);
-	dw1 = __pa(process_tb) | mfspr(SPRN_HRMOR) | (PRTB_SIZE_SHIFT - 12) | PATB_GR;
-	printk_custom_ll("dw1", dw1);
+	dw1 = (__pa(process_tb)) | mfspr(SPRN_HRMOR) | (PRTB_SIZE_SHIFT - 12) | PATB_GR;
 	mmu_partition_table_set_entry(0, dw0, dw1, false);
 
 	pr_info("Initializing Radix MMU\n");
