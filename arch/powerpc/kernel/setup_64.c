@@ -278,8 +278,8 @@ static void cpu_ready_for_interrupts(void)
 			if (pvr_version_is(PVR_POWER10) &&
 					(mfspr(SPRN_PVR) & 0xf00) == 0x100)
 				new_lpcr |= LPCR_AIL_3;
-			else
-				new_lpcr |= LPCR_HAIL;
+			// else
+			// 	new_lpcr |= LPCR_HAIL;
 		} else if (cpu_has_feature(CPU_FTR_ARCH_207S)) {
 			new_lpcr |= LPCR_AIL_3;
 		}
