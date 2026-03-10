@@ -40,9 +40,6 @@
 
 unsigned int mmu_base_pid;
 
-static void printk_custom_ll(volatile const char* str, volatile unsigned long val) {
-	printk(str, val);
-}
 
 static __ref void *early_alloc_pgtable(unsigned long size, int nid,
 			unsigned long region_start, unsigned long region_end)
@@ -83,6 +80,7 @@ static void check_mapping(unsigned long ea) {
 	return;
 }
 
+#define KB 1024
 unsigned long cmask = 0xc000000000000000;
 /*
  * When allocating pud or pmd pointers, we allocate a complete page
@@ -147,7 +145,6 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	ptep = (pte_t*)((unsigned long)ptep & ~hrmor & ~cmask); /* remove */
 
 set_the_pte:
-#define KB 1024
 	set_pte_at(&init_mm, ea, ptep, pfn_pte(pfn + hrmor/(64*KB), flags));
 	asm volatile("ptesync": : :"memory");
 	return 0;
@@ -190,6 +187,7 @@ static int __map_kernel_page(unsigned long ea, unsigned long pa,
 	 * node, so we can place kernel page tables on the right nodes after
 	 * boot.
 	 */
+
 	pgdp = pgd_offset_k(ea);
 	p4dp = p4d_offset(pgdp, ea);
 	pudp = pud_alloc(&init_mm, p4dp, ea);
@@ -669,7 +667,8 @@ void __init radix__early_init_mmu(void)
 	__vmalloc_end = RADIX_VMALLOC_END;
 	__kernel_io_start = RADIX_KERN_IO_START;
 	__kernel_io_end = RADIX_KERN_IO_END;
-	vmemmap = (struct page *)RADIX_VMEMMAP_START;
+	vmemmap = (struct page *)(RADIX_VMEMMAP_START & ~cmask);
+	printk("[shivang] vmemmap start %lx\n", (unsigned long)vmemmap);
 	ioremap_bot = IOREMAP_BASE;
 
 #ifdef CONFIG_PCI
@@ -1006,6 +1005,7 @@ int __meminit radix__vmemmap_create_mapping(unsigned long start,
 				      unsigned long phys)
 {
 	/* Create a PTE encoding */
+	printk("TODO: %s\n", __FUNCTION__);
 	int nid = early_pfn_to_nid(phys >> PAGE_SHIFT);
 	int ret;
 
@@ -1023,6 +1023,7 @@ int __meminit radix__vmemmap_create_mapping(unsigned long start,
 #ifdef CONFIG_ARCH_WANT_OPTIMIZE_DAX_VMEMMAP
 bool vmemmap_can_optimize(struct vmem_altmap *altmap, struct dev_pagemap *pgmap)
 {
+	// printk("TODO: %s\n", __FUNCTION__);
 	if (radix_enabled())
 		return __vmemmap_can_optimize(altmap, pgmap);
 
@@ -1033,6 +1034,7 @@ bool vmemmap_can_optimize(struct vmem_altmap *altmap, struct dev_pagemap *pgmap)
 int __meminit vmemmap_check_pmd(pmd_t *pmdp, int node,
 				unsigned long addr, unsigned long next)
 {
+	// printk("TODO: %s\n", __FUNCTION__);
 	int large = pmd_leaf(*pmdp);
 
 	if (large)
@@ -1044,11 +1046,13 @@ int __meminit vmemmap_check_pmd(pmd_t *pmdp, int node,
 void __meminit vmemmap_set_pmd(pmd_t *pmdp, void *p, int node,
 			       unsigned long addr, unsigned long next)
 {
+	// printk("TODO: %s\n", __FUNCTION__);
 	pte_t entry;
 	pte_t *ptep = pmdp_ptep(pmdp);
+	unsigned long hrmor = mfspr(SPRN_HRMOR);
 
 	VM_BUG_ON(!IS_ALIGNED(addr, PMD_SIZE));
-	entry = pfn_pte(__pa(p) >> PAGE_SHIFT, PAGE_KERNEL);
+	entry = pfn_pte((__pa(p) >> PAGE_SHIFT) + hrmor/(64*KB), PAGE_KERNEL);
 	set_pte_at(&init_mm, addr, ptep, entry);
 	asm volatile("ptesync": : :"memory");
 
@@ -1060,6 +1064,7 @@ static pte_t * __meminit radix__vmemmap_pte_populate(pmd_t *pmdp, unsigned long 
 						     struct vmem_altmap *altmap,
 						     struct page *reuse)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	pte_t *pte = pte_offset_kernel(pmdp, addr);
 
 	if (pte_none(*pte)) {
@@ -1106,40 +1111,60 @@ static pte_t * __meminit radix__vmemmap_pte_populate(pmd_t *pmdp, unsigned long 
 static inline pud_t *vmemmap_pud_alloc(p4d_t *p4dp, int node,
 				       unsigned long address)
 {
+	// printk("TODO: %s\n", __FUNCTION__);
 	pud_t *pud;
+	pud_t *ret;
+	unsigned long hrmor = mfspr(SPRN_HRMOR);
 
 	/* All early vmemmap mapping to keep simple do it at PAGE_SIZE */
 	if (unlikely(p4d_none(*p4dp))) {
 		if (unlikely(!slab_is_available())) {
 			pud = early_alloc_pgtable(PAGE_SIZE, node, 0, 0);
+			pud = (pud_t*)((unsigned long)pud | hrmor);
+			// printk("%s alloc : %lx\n", __FUNCTION__, (unsigned long)pud);
 			p4d_populate(&init_mm, p4dp, pud);
 			/* go to the pud_offset */
-		} else
+		} else {
+			printk("TODO: unhandled case in %s\n", __FUNCTION__);
 			return pud_alloc(&init_mm, p4dp, address);
+		}
 	}
-	return pud_offset(p4dp, address);
+	ret = pud_offset(p4dp, address);
+	ret = (pud_t*)((unsigned long)ret & ~hrmor);
+	// printk("%s ret -> %lx\n", __FUNCTION__, (unsigned long)ret);
+	return ret;
+
 }
 
 static inline pmd_t *vmemmap_pmd_alloc(pud_t *pudp, int node,
 				       unsigned long address)
 {
+	// printk("TODO: %s\n", __FUNCTION__);
 	pmd_t *pmd;
+	pmd_t *ret;
+	unsigned long hrmor = mfspr(SPRN_HRMOR);
 
 	/* All early vmemmap mapping to keep simple do it at PAGE_SIZE */
 	if (unlikely(pud_none(*pudp))) {
 		if (unlikely(!slab_is_available())) {
 			pmd = early_alloc_pgtable(PAGE_SIZE, node, 0, 0);
+			pmd = (pmd_t*)((unsigned long)pmd | hrmor);
 			pud_populate(&init_mm, pudp, pmd);
-		} else
+		} else {
+			printk("TODO: unhandled case in %s\n", __FUNCTION__);
 			return pmd_alloc(&init_mm, pudp, address);
+		}
 	}
-	return pmd_offset(pudp, address);
+	ret = pmd_offset(pudp, address);
+	ret = (pmd_t*)((unsigned long)ret & ~hrmor);
+	return ret;
 }
 
 static inline pte_t *vmemmap_pte_alloc(pmd_t *pmdp, int node,
 				       unsigned long address)
 {
 	pte_t *pte;
+	printk("TODO: %s\n", __FUNCTION__);
 
 	/* All early vmemmap mapping to keep simple do it at PAGE_SIZE */
 	if (unlikely(pmd_none(*pmdp))) {
@@ -1157,6 +1182,7 @@ static inline pte_t *vmemmap_pte_alloc(pmd_t *pmdp, int node,
 int __meminit radix__vmemmap_populate(unsigned long start, unsigned long end, int node,
 				      struct vmem_altmap *altmap)
 {
+	// printk("TODO: %s\n", __FUNCTION__);
 	unsigned long addr;
 	unsigned long next;
 	pgd_t *pgd;
@@ -1220,6 +1246,7 @@ int __meminit radix__vmemmap_populate(unsigned long start, unsigned long end, in
 			}
 
 			p = vmemmap_alloc_block_buf(PMD_SIZE, node, altmap);
+			printk("[shivang ] allocated memmap pte at @%lx\n", (unsigned long)p);
 			if (p) {
 				vmemmap_set_pmd(pmd, p, node, addr, next);
 				pr_debug("PMD_SIZE vmemmap mapping\n");
@@ -1264,6 +1291,7 @@ static pte_t * __meminit radix__vmemmap_populate_address(unsigned long addr, int
 							 struct vmem_altmap *altmap,
 							 struct page *reuse)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	pgd_t *pgd;
 	p4d_t *p4d;
 	pud_t *pud;
@@ -1296,6 +1324,7 @@ static pte_t * __meminit radix__vmemmap_populate_address(unsigned long addr, int
 static pte_t * __meminit vmemmap_compound_tail_page(unsigned long addr,
 						    unsigned long pfn_offset, int node)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	pgd_t *pgd;
 	p4d_t *p4d;
 	pud_t *pud;
@@ -1351,6 +1380,7 @@ int __meminit vmemmap_populate_compound_pages(unsigned long start_pfn,
 					      unsigned long end, int node,
 					      struct dev_pagemap *pgmap)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	/*
 	 * we want to map things as base page size mapping so that
 	 * we can save space in vmemmap. We could have huge mapping
@@ -1457,12 +1487,14 @@ int __meminit vmemmap_populate_compound_pages(unsigned long start_pfn,
 #ifdef CONFIG_MEMORY_HOTPLUG
 void __meminit radix__vmemmap_remove_mapping(unsigned long start, unsigned long page_size)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	remove_pagetable(start, start + page_size, true, NULL);
 }
 
 void __ref radix__vmemmap_free(unsigned long start, unsigned long end,
 			       struct vmem_altmap *altmap)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	remove_pagetable(start, end, false, altmap);
 }
 #endif
@@ -1474,6 +1506,7 @@ unsigned long radix__pmd_hugepage_update(struct mm_struct *mm, unsigned long add
 				  pmd_t *pmdp, unsigned long clr,
 				  unsigned long set)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	unsigned long old;
 
 #ifdef CONFIG_DEBUG_VM
@@ -1491,6 +1524,7 @@ unsigned long radix__pud_hugepage_update(struct mm_struct *mm, unsigned long add
 					 pud_t *pudp, unsigned long clr,
 					 unsigned long set)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	unsigned long old;
 
 #ifdef CONFIG_DEBUG_VM
@@ -1508,6 +1542,7 @@ pmd_t radix__pmdp_collapse_flush(struct vm_area_struct *vma, unsigned long addre
 			pmd_t *pmdp)
 
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	pmd_t pmd;
 
 	VM_BUG_ON(address & ~HPAGE_PMD_MASK);
@@ -1532,6 +1567,7 @@ pmd_t radix__pmdp_collapse_flush(struct vm_area_struct *vma, unsigned long addre
 void radix__pgtable_trans_huge_deposit(struct mm_struct *mm, pmd_t *pmdp,
 				 pgtable_t pgtable)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	struct list_head *lh = (struct list_head *) pgtable;
 
 	assert_spin_locked(pmd_lockptr(mm, pmdp));
@@ -1546,6 +1582,7 @@ void radix__pgtable_trans_huge_deposit(struct mm_struct *mm, pmd_t *pmdp,
 
 pgtable_t radix__pgtable_trans_huge_withdraw(struct mm_struct *mm, pmd_t *pmdp)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	pte_t *ptep;
 	pgtable_t pgtable;
 	struct list_head *lh;
@@ -1571,6 +1608,7 @@ pgtable_t radix__pgtable_trans_huge_withdraw(struct mm_struct *mm, pmd_t *pmdp)
 pmd_t radix__pmdp_huge_get_and_clear(struct mm_struct *mm,
 				     unsigned long addr, pmd_t *pmdp)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	pmd_t old_pmd;
 	unsigned long old;
 
@@ -1582,6 +1620,7 @@ pmd_t radix__pmdp_huge_get_and_clear(struct mm_struct *mm,
 pud_t radix__pudp_huge_get_and_clear(struct mm_struct *mm,
 				     unsigned long addr, pud_t *pudp)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	pud_t old_pud;
 	unsigned long old;
 
@@ -1595,6 +1634,7 @@ pud_t radix__pudp_huge_get_and_clear(struct mm_struct *mm,
 void radix__ptep_set_access_flags(struct vm_area_struct *vma, pte_t *ptep,
 				  pte_t entry, unsigned long address, int psize)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	struct mm_struct *mm = vma->vm_mm;
 	unsigned long set = pte_val(entry) & (_PAGE_DIRTY | _PAGE_SOFT_DIRTY |
 					      _PAGE_ACCESSED | _PAGE_RW | _PAGE_EXEC);
@@ -1638,6 +1678,7 @@ void radix__ptep_modify_prot_commit(struct vm_area_struct *vma,
 				    unsigned long addr, pte_t *ptep,
 				    pte_t old_pte, pte_t pte)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	struct mm_struct *mm = vma->vm_mm;
 
 	/*
@@ -1655,6 +1696,7 @@ void radix__ptep_modify_prot_commit(struct vm_area_struct *vma,
 
 int pud_set_huge(pud_t *pud, phys_addr_t addr, pgprot_t prot)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	pte_t *ptep = (pte_t *)pud;
 	pte_t new_pud = pfn_pte(__phys_to_pfn(addr), prot);
 
@@ -1668,6 +1710,7 @@ int pud_set_huge(pud_t *pud, phys_addr_t addr, pgprot_t prot)
 
 int pud_clear_huge(pud_t *pud)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	if (pud_leaf(*pud)) {
 		pud_clear(pud);
 		return 1;
@@ -1678,6 +1721,7 @@ int pud_clear_huge(pud_t *pud)
 
 int pud_free_pmd_page(pud_t *pud, unsigned long addr)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	pmd_t *pmd;
 	int i;
 
@@ -1702,6 +1746,7 @@ int pud_free_pmd_page(pud_t *pud, unsigned long addr)
 
 int pmd_set_huge(pmd_t *pmd, phys_addr_t addr, pgprot_t prot)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	pte_t *ptep = (pte_t *)pmd;
 	pte_t new_pmd = pfn_pte(__phys_to_pfn(addr), prot);
 
@@ -1715,6 +1760,7 @@ int pmd_set_huge(pmd_t *pmd, phys_addr_t addr, pgprot_t prot)
 
 int pmd_clear_huge(pmd_t *pmd)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	if (pmd_leaf(*pmd)) {
 		pmd_clear(pmd);
 		return 1;
@@ -1725,6 +1771,7 @@ int pmd_clear_huge(pmd_t *pmd)
 
 int pmd_free_pte_page(pmd_t *pmd, unsigned long addr)
 {
+	printk("TODO: %s\n", __FUNCTION__);
 	pte_t *pte;
 
 	pte = (pte_t *)pmd_page_vaddr(*pmd);
