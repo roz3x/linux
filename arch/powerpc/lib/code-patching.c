@@ -65,6 +65,7 @@ static void unmap_patch_area(unsigned long addr);
 
 static bool mm_patch_enabled(void)
 {
+	return false;
 	return IS_ENABLED(CONFIG_SMP) && radix_enabled();
 }
 
