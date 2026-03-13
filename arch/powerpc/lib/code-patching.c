@@ -378,6 +378,9 @@ static int patch_mem(void *addr, unsigned long val, bool is_dword)
 
 int patch_instruction(u32 *addr, ppc_inst_t instr)
 {
+	if (!mm_patch_enabled())
+		return 0;
+
 	if (ppc_inst_prefixed(instr))
 		return patch_mem(addr, ppc_inst_as_ulong(instr), true);
 	else
