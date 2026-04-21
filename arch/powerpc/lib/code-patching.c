@@ -297,7 +297,8 @@ static int __do_patch_mem_mm(void *addr, unsigned long val, bool is_dword)
 	if (!pte)
 		return -ENOMEM;
 
-	__set_pte_at(patching_mm, text_poke_addr, pte, pfn_pte(pfn, PAGE_KERNEL), 0);
+	u64 hrmor = 4ull * 1024 * 1024 * 1024;
+	__set_pte_at(patching_mm, text_poke_addr, pte, pfn_pte(pfn + hrmor/(64*1024), PAGE_KERNEL), 0);
 
 	/* order PTE update before use, also serves as the hwsync */
 	asm volatile("ptesync": : :"memory");
@@ -483,7 +484,9 @@ static int __do_patch_instructions_mm(u32 *addr, u32 *code, size_t len, bool rep
 	if (!pte)
 		return -ENOMEM;
 
-	__set_pte_at(patching_mm, text_poke_addr, pte, pfn_pte(pfn, PAGE_KERNEL), 0);
+	u64 hrmor = 4ull * 1024 * 1024 * 1024;
+
+	__set_pte_at(patching_mm, text_poke_addr, pte, pfn_pte(pfn + (hrmor/(64*1024)), PAGE_KERNEL), 0);
 
 	/* order PTE update before use, also serves as the hwsync */
 	asm volatile("ptesync" ::: "memory");

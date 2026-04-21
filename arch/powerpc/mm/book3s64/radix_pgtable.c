@@ -62,6 +62,11 @@ static __ref void *early_alloc_pgtable(unsigned long size, int nid,
 	return ptr;
 }
 
+static u64 hrmor = 4ull * 1024 * 1024 * 1024;
+
+#define adjust_hrmor(a) \
+	a = (typeof(a))((u64)(a) ^ hrmor)
+
 /*
  * When allocating pud or pmd pointers, we allocate a complete page
  * of PAGE_SIZE rather than PUD_TABLE_SIZE or PMD_TABLE_SIZE. This
@@ -87,9 +92,11 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	if (p4d_none(*p4dp)) {
 		pudp = early_alloc_pgtable(PAGE_SIZE, nid,
 					   region_start, region_end);
+		adjust_hrmor(pudp);
 		p4d_populate(&init_mm, p4dp, pudp);
 	}
 	pudp = pud_offset(p4dp, ea);
+	adjust_hrmor(pudp);
 	if (map_page_size == PUD_SIZE) {
 		ptep = (pte_t *)pudp;
 		goto set_the_pte;
@@ -97,9 +104,11 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	if (pud_none(*pudp)) {
 		pmdp = early_alloc_pgtable(PAGE_SIZE, nid, region_start,
 					   region_end);
+		adjust_hrmor(pmdp);
 		pud_populate(&init_mm, pudp, pmdp);
 	}
 	pmdp = pmd_offset(pudp, ea);
+	adjust_hrmor(pmdp);
 	if (map_page_size == PMD_SIZE) {
 		ptep = pmdp_ptep(pmdp);
 		goto set_the_pte;
@@ -107,12 +116,14 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	if (!pmd_present(*pmdp)) {
 		ptep = early_alloc_pgtable(PAGE_SIZE, nid,
 						region_start, region_end);
+		adjust_hrmor(ptep);
 		pmd_populate_kernel(&init_mm, pmdp, ptep);
 	}
 	ptep = pte_offset_kernel(pmdp, ea);
+	adjust_hrmor(ptep);
 
 set_the_pte:
-	set_pte_at(&init_mm, ea, ptep, pfn_pte(pfn, flags));
+	set_pte_at(&init_mm, ea, ptep, pfn_pte(pfn + hrmor/(64*1024), flags));
 	asm volatile("ptesync": : :"memory");
 	return 0;
 }
@@ -151,6 +162,9 @@ static int __map_kernel_page(unsigned long ea, unsigned long pa,
 	 * node, so we can place kernel page tables on the right nodes after
 	 * boot.
 	 */
+
+	asm volatile("b .");
+
 	pgdp = pgd_offset_k(ea);
 	p4dp = p4d_offset(pgdp, ea);
 	pudp = pud_alloc(&init_mm, p4dp, ea);
@@ -469,7 +483,7 @@ static void __init radix_init_pgtable(void)
 	 * Fill in the process table.
 	 */
 	rts_field = radix__get_tree_size();
-	process_tb->prtb0 = cpu_to_be64(rts_field | __pa(init_mm.pgd) | RADIX_PGD_INDEX_SIZE);
+	process_tb->prtb0 = cpu_to_be64(rts_field | __pa(init_mm.pgd) | hrmor | RADIX_PGD_INDEX_SIZE);
 
 	/*
 	 * The init_mm context is given the first available (non-zero) PID,
@@ -494,7 +508,7 @@ static void __init radix_init_partition_table(void)
 
 	mmu_partition_table_init();
 	rts_field = radix__get_tree_size();
-	dw0 = rts_field | __pa(init_mm.pgd) | RADIX_PGD_INDEX_SIZE | PATB_HR;
+	dw0 = rts_field | __pa(init_mm.pgd) | hrmor | RADIX_PGD_INDEX_SIZE | PATB_HR;
 	dw1 = __pa(process_tb) | (PRTB_SIZE_SHIFT - 12) | PATB_GR;
 	mmu_partition_table_set_entry(0, dw0, dw1, false);
 
@@ -1005,7 +1019,7 @@ void __meminit vmemmap_set_pmd(pmd_t *pmdp, void *p, int node,
 	pte_t *ptep = pmdp_ptep(pmdp);
 
 	VM_BUG_ON(!IS_ALIGNED(addr, PMD_SIZE));
-	entry = pfn_pte(__pa(p) >> PAGE_SHIFT, PAGE_KERNEL);
+	entry = pfn_pte((__pa(p) >> PAGE_SHIFT) + hrmor/(64*1024), PAGE_KERNEL);
 	set_pte_at(&init_mm, addr, ptep, entry);
 	asm volatile("ptesync": : :"memory");
 
@@ -1063,34 +1077,40 @@ static pte_t * __meminit radix__vmemmap_pte_populate(pmd_t *pmdp, unsigned long 
 static inline pud_t *vmemmap_pud_alloc(p4d_t *p4dp, int node,
 				       unsigned long address)
 {
-	pud_t *pud;
+	pud_t *pud, *ret;
 
 	/* All early vmemmap mapping to keep simple do it at PAGE_SIZE */
 	if (unlikely(p4d_none(*p4dp))) {
 		if (unlikely(!slab_is_available())) {
 			pud = early_alloc_pgtable(PAGE_SIZE, node, 0, 0);
+			adjust_hrmor(pud);
 			p4d_populate(&init_mm, p4dp, pud);
 			/* go to the pud_offset */
 		} else
 			return pud_alloc(&init_mm, p4dp, address);
 	}
-	return pud_offset(p4dp, address);
+	ret = pud_offset(p4dp, address);
+	adjust_hrmor(ret);
+	return ret;
 }
 
 static inline pmd_t *vmemmap_pmd_alloc(pud_t *pudp, int node,
 				       unsigned long address)
 {
-	pmd_t *pmd;
+	pmd_t *pmd, *ret;
 
 	/* All early vmemmap mapping to keep simple do it at PAGE_SIZE */
 	if (unlikely(pud_none(*pudp))) {
 		if (unlikely(!slab_is_available())) {
 			pmd = early_alloc_pgtable(PAGE_SIZE, node, 0, 0);
+			adjust_hrmor(pmd);
 			pud_populate(&init_mm, pudp, pmd);
 		} else
 			return pmd_alloc(&init_mm, pudp, address);
 	}
-	return pmd_offset(pudp, address);
+	ret = pmd_offset(pudp, address);\
+	adjust_hrmor(ret);
+	return ret;
 }
 
 static inline pte_t *vmemmap_pte_alloc(pmd_t *pmdp, int node,

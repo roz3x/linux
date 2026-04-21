@@ -115,7 +115,13 @@ static int64_t opal_call(int64_t a0, int64_t a1, int64_t a2, int64_t a3,
 	if (DO_TRACE) {
 		ret = __opal_call_trace(a0, a1, a2, a3, a4, a5, a6, a7, opcode, msr);
 	} else {
+		/* supported non-identity mapped kernels */
+		/* change addresses to __pa */
+		// ret = __opal_call(__pa(a0), __pa(a1), __pa(a2), 
+	   	// 			__pa(a3), __pa(a4), __pa(a5), __pa(a6),
+		// 			__pa(a7), opcode, msr);
 		ret = __opal_call(a0, a1, a2, a3, a4, a5, a6, a7, opcode, msr);
+
 	}
 
 	local_irq_restore(flags);

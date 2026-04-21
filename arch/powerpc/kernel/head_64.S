@@ -1012,6 +1012,34 @@ start_here_multiplatform:
 	mtctr	r12
 	bctrl		/* also sets r13 and SPRG_PACA */
 
+    /* starting relocation procedure here */
+	
+	/* clearing registers */
+	li r6, 0
+	mr r9, r6
+	mr r3, r6
+	mr r4, r6
+	mr r5, r6 
+
+    /* r3 <- destination addres */
+	li r9, 1
+	rotldi r3, r9, 32
+
+	/* r4 <- src location */
+	li r4, 0
+
+	/* r5 <- 4G */
+	li r9, 1
+	rotldi r5, r9, 32
+
+	/* r6 <- start copy from */
+	mr r6, r4
+
+	/* copy and flush */
+	bl copy_and_flush
+
+	/* relocation procedure ends here */
+
 	LOAD_REG_ADDR(r3, start_here_common)
 	ld	r4,PACAKMSR(r13)
 	mtspr	SPRN_SRR0,r3
@@ -1022,6 +1050,13 @@ start_here_multiplatform:
 	/* This is where all platforms converge execution */
 
 start_here_common:
+
+
+    li      r9,1
+    rotldi  r3,r9,32
+
+	mthrmor r3
+
 	/* relocation is on at this point */
 	std	r1,PACAKSAVE(r13)
 
@@ -1037,6 +1072,12 @@ start_here_common:
 	stb	r0,PACAIRQHAPPENED(r13)
 
 	/* Generic kernel entry */
+	mr      r10,r1
+    li      r9,-1
+    clrrdi  r9,r9,62
+    or      r9,r10,r9
+    mr      r1,r9
+
 	bl	CFUNC(start_kernel)
 
 	/* Not reached */

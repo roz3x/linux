@@ -27,6 +27,7 @@ _GLOBAL_TOC(__opal_call)
 	li	r0,MSR_IR|MSR_DR|MSR_LE
 	andc	r12,r12,r0
 	LOAD_REG_ADDR(r11, opal_return)
+	clrldi  r11,r11,2
 	mtlr	r11
 	LOAD_REG_ADDR(r11, opal)
 	ld	r2,0(r11)
@@ -35,6 +36,7 @@ _GLOBAL_TOC(__opal_call)
 	mtspr	SPRN_HSRR1,r12
 	/* set token to r0 */
 	ld	r0,STK_PARAM(R11)(r1)
+	clrldi  r1,r1,2
 	hrfid
 opal_return:
 	/*
@@ -49,14 +51,33 @@ opal_return:
 	.byte (STK_PARAM(R12) >> 8) & 0xff
 	.byte STK_PARAM(R12) & 0xff
 
+	.long 0x80002178 /* clrldi  r1,r1,2 */
+
 	.long 0x280c6a7d /* ldbrx r11,r10,r1			*/
 	.long 0x05009f42 /* bcl 20,31,$+4			*/
 	.long 0xa602487d /* mflr r10				*/
-	.long 0x14004a39 /* addi r10,r10,20			*/
-	.long 0xa64b5a7d /* mthsrr0 r10				*/
-	.long 0xa64b7b7d /* mthsrr1 r11				*/
-	.long 0x2402004c /* hrfid				*/
+	.long 0x34004a39 /* addi r10,r10,52			<--- change this if you change the instruction before hrfid */
+	
+	.long 0x785b697d /* mr r9, r11 */
+	.long 0xb6062955 /* rlwinm r9, r9, 0, 26, 27 */
+	.long 0x0000292c /* cmpdi r9, 0 */
+	.long 0x14008241 /* beq ??? */
+
+	.long 0xffff2039 /* li r9, -1 */
+	.long 0x44002979 /* clrrdi r9, r9, 62 */
+	.long 0x784b497d /* or r9, r10, r9 */
+	.long 0x784b2a7d /* mr r10, r9 */
+
+	.long 0xa64b5a7d /* mthsrr0 r10	 */
+	.long 0xa64b7b7d /* mthsrr1 r11  */
+	.long 0x2402004c /* hrfid */
+
 #endif
+	li r10, -1
+	clrrdi r10, r10, 62
+	or r10, r1, r10
+	mr r1, r10
+
 	LOAD_PACA_TOC()
 	ld	r0,PPC_LR_STKOFF(r1)
 	mtlr	r0
