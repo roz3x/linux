@@ -635,6 +635,10 @@ void __init radix__early_init_mmu(void)
 	__pud_val_bits = RADIX_PUD_VAL_BITS;
 	__pgd_val_bits = RADIX_PGD_VAL_BITS;
 
+	__pmd_masked_bits = 0xc0000000000000ffUL;
+	__pud_masked_bits = 0xc0000000000000ffUL;
+	__pgd_masked_bits = 0xc0000000000000ffUL;
+
 	__kernel_virt_start = RADIX_KERN_VIRT_START;
 	__vmalloc_start = RADIX_VMALLOC_START;
 	__vmalloc_end = RADIX_VMALLOC_END;
