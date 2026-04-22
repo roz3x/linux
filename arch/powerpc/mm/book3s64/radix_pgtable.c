@@ -41,6 +41,23 @@
 
 unsigned int mmu_base_pid;
 
+static u64 hrmor = 4ull * 1024 * 1024 * 1024;
+
+inline void radix__set_pte_at(struct mm_struct *mm, unsigned long addr,
+				 pte_t *ptep, pte_t pte, int percpu)
+{
+	u64 pfn = pte_pfn(pte);
+	u64 flags = pte_val(pte) & ~PTE_RPN_MASK;
+
+	pfn = pfn + hrmor/(64*1024);
+	pfn <<= PAGE_SHIFT;
+	pfn &= PTE_RPN_MASK;
+
+	*ptep = __pte(pfn | flags);
+}
+
+EXPORT_SYMBOL(radix__set_pte_at);
+
 static __ref void *early_alloc_pgtable(unsigned long size, int nid,
 			unsigned long region_start, unsigned long region_end)
 {
@@ -62,11 +79,11 @@ static __ref void *early_alloc_pgtable(unsigned long size, int nid,
 	return ptr;
 }
 
-static u64 hrmor = 4ull * 1024 * 1024 * 1024;
 
-#define adjust_hrmor(a) \
-	a = (typeof(a))((u64)(a) ^ hrmor)
+// #define adjust_hrmor(a)
+// 	a = (typeof(a))((u64)(a) ^ hrmor)
 
+#define adjust_hrmor(a) a = a
 /*
  * When allocating pud or pmd pointers, we allocate a complete page
  * of PAGE_SIZE rather than PUD_TABLE_SIZE or PMD_TABLE_SIZE. This
@@ -117,13 +134,16 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 		ptep = early_alloc_pgtable(PAGE_SIZE, nid,
 						region_start, region_end);
 		adjust_hrmor(ptep);
+		if ((u64)ptep == 0xc00000003e1c0000ull) {
+			// asm volatile("b .");
+		}
 		pmd_populate_kernel(&init_mm, pmdp, ptep);
 	}
 	ptep = pte_offset_kernel(pmdp, ea);
 	adjust_hrmor(ptep);
 
 set_the_pte:
-	set_pte_at(&init_mm, ea, ptep, pfn_pte(pfn + hrmor/(64*1024), flags));
+	set_pte_at(&init_mm, ea, ptep, pfn_pte(pfn, flags));
 	asm volatile("ptesync": : :"memory");
 	return 0;
 }
@@ -631,13 +651,13 @@ void __init radix__early_init_mmu(void)
 	__pud_table_size = RADIX_PUD_TABLE_SIZE;
 	__pgd_table_size = RADIX_PGD_TABLE_SIZE;
 
-	__pmd_val_bits = RADIX_PMD_VAL_BITS;
-	__pud_val_bits = RADIX_PUD_VAL_BITS;
-	__pgd_val_bits = RADIX_PGD_VAL_BITS;
+	__pmd_val_bits = RADIX_PMD_VAL_BITS | hrmor;
+	__pud_val_bits = RADIX_PUD_VAL_BITS | hrmor;
+	__pgd_val_bits = RADIX_PGD_VAL_BITS | hrmor;
 
-	__pmd_masked_bits = 0xc0000000000000ffUL;
-	__pud_masked_bits = 0xc0000000000000ffUL;
-	__pgd_masked_bits = 0xc0000000000000ffUL;
+	__pmd_masked_bits = 0xc0000000000000ffUL | hrmor;
+	__pud_masked_bits = 0xc0000000000000ffUL | hrmor;
+	__pgd_masked_bits = 0xc0000000000000ffUL | hrmor;
 
 	__kernel_virt_start = RADIX_KERN_VIRT_START;
 	__vmalloc_start = RADIX_VMALLOC_START;
@@ -1023,7 +1043,7 @@ void __meminit vmemmap_set_pmd(pmd_t *pmdp, void *p, int node,
 	pte_t *ptep = pmdp_ptep(pmdp);
 
 	VM_BUG_ON(!IS_ALIGNED(addr, PMD_SIZE));
-	entry = pfn_pte((__pa(p) >> PAGE_SHIFT) + hrmor/(64*1024), PAGE_KERNEL);
+	entry = pfn_pte(__pa(p) >> PAGE_SHIFT, PAGE_KERNEL);
 	set_pte_at(&init_mm, addr, ptep, entry);
 	asm volatile("ptesync": : :"memory");
 
