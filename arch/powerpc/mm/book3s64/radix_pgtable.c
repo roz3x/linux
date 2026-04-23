@@ -79,11 +79,6 @@ static __ref void *early_alloc_pgtable(unsigned long size, int nid,
 	return ptr;
 }
 
-
-// #define adjust_hrmor(a)
-// 	a = (typeof(a))((u64)(a) ^ hrmor)
-
-#define adjust_hrmor(a) a = a
 /*
  * When allocating pud or pmd pointers, we allocate a complete page
  * of PAGE_SIZE rather than PUD_TABLE_SIZE or PMD_TABLE_SIZE. This
@@ -109,11 +104,9 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	if (p4d_none(*p4dp)) {
 		pudp = early_alloc_pgtable(PAGE_SIZE, nid,
 					   region_start, region_end);
-		adjust_hrmor(pudp);
 		p4d_populate(&init_mm, p4dp, pudp);
 	}
 	pudp = pud_offset(p4dp, ea);
-	adjust_hrmor(pudp);
 	if (map_page_size == PUD_SIZE) {
 		ptep = (pte_t *)pudp;
 		goto set_the_pte;
@@ -121,11 +114,9 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	if (pud_none(*pudp)) {
 		pmdp = early_alloc_pgtable(PAGE_SIZE, nid, region_start,
 					   region_end);
-		adjust_hrmor(pmdp);
 		pud_populate(&init_mm, pudp, pmdp);
 	}
 	pmdp = pmd_offset(pudp, ea);
-	adjust_hrmor(pmdp);
 	if (map_page_size == PMD_SIZE) {
 		ptep = pmdp_ptep(pmdp);
 		goto set_the_pte;
@@ -133,14 +124,9 @@ static int early_map_kernel_page(unsigned long ea, unsigned long pa,
 	if (!pmd_present(*pmdp)) {
 		ptep = early_alloc_pgtable(PAGE_SIZE, nid,
 						region_start, region_end);
-		adjust_hrmor(ptep);
-		if ((u64)ptep == 0xc00000003e1c0000ull) {
-			// asm volatile("b .");
-		}
 		pmd_populate_kernel(&init_mm, pmdp, ptep);
 	}
 	ptep = pte_offset_kernel(pmdp, ea);
-	adjust_hrmor(ptep);
 
 set_the_pte:
 	set_pte_at(&init_mm, ea, ptep, pfn_pte(pfn, flags));
@@ -182,8 +168,6 @@ static int __map_kernel_page(unsigned long ea, unsigned long pa,
 	 * node, so we can place kernel page tables on the right nodes after
 	 * boot.
 	 */
-
-	asm volatile("b .");
 
 	pgdp = pgd_offset_k(ea);
 	p4dp = p4d_offset(pgdp, ea);
@@ -1107,14 +1091,12 @@ static inline pud_t *vmemmap_pud_alloc(p4d_t *p4dp, int node,
 	if (unlikely(p4d_none(*p4dp))) {
 		if (unlikely(!slab_is_available())) {
 			pud = early_alloc_pgtable(PAGE_SIZE, node, 0, 0);
-			adjust_hrmor(pud);
 			p4d_populate(&init_mm, p4dp, pud);
 			/* go to the pud_offset */
 		} else
 			return pud_alloc(&init_mm, p4dp, address);
 	}
 	ret = pud_offset(p4dp, address);
-	adjust_hrmor(ret);
 	return ret;
 }
 
@@ -1127,13 +1109,11 @@ static inline pmd_t *vmemmap_pmd_alloc(pud_t *pudp, int node,
 	if (unlikely(pud_none(*pudp))) {
 		if (unlikely(!slab_is_available())) {
 			pmd = early_alloc_pgtable(PAGE_SIZE, node, 0, 0);
-			adjust_hrmor(pmd);
 			pud_populate(&init_mm, pudp, pmd);
 		} else
 			return pmd_alloc(&init_mm, pudp, address);
 	}
 	ret = pmd_offset(pudp, address);\
-	adjust_hrmor(ret);
 	return ret;
 }
 
