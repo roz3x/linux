@@ -49,7 +49,21 @@ inline void radix__set_pte_at(struct mm_struct *mm, unsigned long addr,
 	u64 pfn = pte_pfn(pte);
 	u64 flags = pte_val(pte) & ~PTE_RPN_MASK;
 
-	pfn = pfn + hrmor/(64*1024);
+	/* This check is for a very specific reason 
+	 * ill try to describe it here.
+	
+	 * some functions in kernel (cough ptep_get) 
+	 * read the naked value of a ptep, and try to 
+	 * push that value inside radix tree. (cough vmemmap_to_pfn/patch_mm)
+	 * this causes the already applied hrmor offset again.
+	 * 
+	 * so to fix this, we have to segrigate our operations here.
+	 */
+	u64 hrmor_offset = (hrmor/(64*1024));
+
+	if (pfn < hrmor_offset)
+		pfn = pfn + hrmor_offset;
+
 	pfn <<= PAGE_SHIFT;
 	pfn &= PTE_RPN_MASK;
 
