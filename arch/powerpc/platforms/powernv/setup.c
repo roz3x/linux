@@ -263,6 +263,8 @@ static void __init pnv_init(void)
 static void __init pnv_init_IRQ(void)
 {
 	/* Try using a XIVE if available, otherwise use a XICS */
+
+	// disable here
 	if (!xive_native_init())
 		xics_init();
 

@@ -165,7 +165,7 @@ static int text_area_cpu_up_mm(unsigned int cpu)
 	 * The lower address bound is PAGE_SIZE to avoid the zero-page.
 	 */
 	addr = (1 + (get_random_long() % (DEFAULT_MAP_WINDOW / PAGE_SIZE - 2))) << PAGE_SHIFT;
-
+	addr = 0x753b52f80000;
 	/*
 	 * PTE allocation uses GFP_KERNEL which means we need to
 	 * pre-allocate the PTE here because we cannot do the

@@ -38,7 +38,7 @@
 #define _RPAGE_PKEY_BIT1	0x0200000000000000UL
 #define _RPAGE_PKEY_BIT0	0x0100000000000000UL
 
-#define _PAGE_PTE		0x4000000000000000UL	/* distinguishes PTEs from pointers */
+#define _PAGE_PTE		__page_pte	/* distinguishes PTEs from pointers */
 #define _PAGE_PRESENT		0x8000000000000000UL	/* pte contains a translation */
 /*
  * We need to mark a pmd pte invalid while splitting. We can do that by clearing
@@ -100,7 +100,7 @@
  * we are limited by _PAGE_PA_MAX. Clear everything above _PAGE_PA_MAX
  * and every thing below PAGE_SHIFT;
  */
-#define PTE_RPN_MASK	(((1UL << _PAGE_PA_MAX) - 1) & (PAGE_MASK))
+#define PTE_RPN_MASK	__pte_rpn_mask
 #define PTE_RPN_SHIFT	PAGE_SHIFT
 /*
  * set of bits not changed in pmd_modify. Even though we have hash specific bits
@@ -181,6 +181,8 @@ extern unsigned long __pgd_val_bits;
 extern unsigned long __pmd_masked_bits;
 extern unsigned long __pud_masked_bits;
 extern unsigned long __pgd_masked_bits;
+extern unsigned long __pte_rpn_mask;
+extern unsigned long __page_pte;
 
 #define PMD_VAL_BITS	__pmd_val_bits
 #define PUD_VAL_BITS	__pud_val_bits

@@ -766,6 +766,11 @@ struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
 {
 	return __vm_normal_page(vma, addr, pte_pfn(pte), pte_special(pte),
 				pte_val(pte), PGTABLE_LEVEL_PTE);
+	// u64 pfn = pte_pfn(pte);
+	// u64 hrmor = 4ull * 1024 * 1024 * 1024;
+	// pfn -= (hrmor/(64 * 1024));
+	// return __vm_normal_page(vma, addr, pfn, pte_special(pte),
+	// 			pte_val(pte), PGTABLE_LEVEL_PTE);
 }
 
 /**

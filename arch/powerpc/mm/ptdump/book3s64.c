@@ -31,8 +31,8 @@ static const struct flag_info flag_array[] = {
 		.set	= " X ",
 		.clear	= "   ",
 	}, {
-		.mask	= _PAGE_PTE,
-		.val	= _PAGE_PTE,
+		.mask	= 0x4000000000000000UL,
+		.val	= 0x4000000000000000UL,
 		.set	= "pte",
 		.clear	= "   ",
 	}, {

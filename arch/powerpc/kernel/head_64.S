@@ -880,6 +880,12 @@ __secondary_start:
  * before going into C code.
  */
 start_secondary_prolog:
+
+	    li      r9,1
+	    rotldi  r3,r9,32
+
+	mthrmor r3
+
 	LOAD_PACA_TOC()
 	li	r3,0
 	std	r3,0(r1)		/* Zero the stack frame pointer	*/

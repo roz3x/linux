@@ -41,14 +41,13 @@
 
 unsigned int mmu_base_pid;
 
-static u64 hrmor = 4ull * 1024 * 1024 * 1024;
+static const u64 hrmor = 4ull * 1024 * 1024 * 1024;
+static u64 hrmor_offset = hrmor / (64*1024);
 
 inline void radix__set_pte_at(struct mm_struct *mm, unsigned long addr,
 				 pte_t *ptep, pte_t pte, int percpu)
 {
-	u64 pfn = pte_pfn(pte);
-	u64 flags = pte_val(pte) & ~PTE_RPN_MASK;
-
+	
 	/* This check is for a very specific reason 
 	 * ill try to describe it here.
 	
@@ -59,7 +58,10 @@ inline void radix__set_pte_at(struct mm_struct *mm, unsigned long addr,
 	 * 
 	 * so to fix this, we have to segrigate our operations here.
 	 */
-	u64 hrmor_offset = (hrmor/(64*1024));
+
+	// *ptep = pte;
+	u64 pfn = pte_pfn(pte);
+	u64 flags = pte_val(pte) & ~PTE_RPN_MASK;
 
 	if (pfn < hrmor_offset)
 		pfn = pfn + hrmor_offset;
@@ -71,6 +73,17 @@ inline void radix__set_pte_at(struct mm_struct *mm, unsigned long addr,
 }
 
 EXPORT_SYMBOL(radix__set_pte_at);
+
+inline unsigned long pte_pfn(pte_t pte)
+{
+	unsigned long pfn =  ((pte_val(pte) & PTE_RPN_MASK) >> PTE_RPN_SHIFT);
+
+	if (pfn <= 2*hrmor_offset && pfn >= hrmor_offset) 
+		pfn -= hrmor_offset;
+
+	return pfn;
+}
+EXPORT_SYMBOL(pte_pfn);
 
 static __ref void *early_alloc_pgtable(unsigned long size, int nid,
 			unsigned long region_start, unsigned long region_end)
@@ -523,6 +536,8 @@ static void __init radix_init_pgtable(void)
 static void __init radix_init_partition_table(void)
 {
 	unsigned long rts_field, dw0, dw1;
+	printk("RPN_MASK : %lx\n", PTE_RPN_MASK);
+	printk("PAGE_SHIFT: %llx\n", 1ull << PAGE_SHIFT);
 
 	mmu_partition_table_init();
 	rts_field = radix__get_tree_size();
@@ -656,6 +671,11 @@ void __init radix__early_init_mmu(void)
 	__pmd_masked_bits = 0xc0000000000000ffUL | hrmor;
 	__pud_masked_bits = 0xc0000000000000ffUL | hrmor;
 	__pgd_masked_bits = 0xc0000000000000ffUL | hrmor;
+
+	__pte_rpn_mask = (((1UL << _PAGE_PA_MAX) - 1) & (PAGE_MASK)) ;
+	// & ~((hrmor/ (64*1024)) << PAGE_SHIFT) ;
+	__page_pte = 0x4000000000000000UL;
+	//  | ((hrmor/ (64*1024)) << PAGE_SHIFT);
 
 	__kernel_virt_start = RADIX_KERN_VIRT_START;
 	__vmalloc_start = RADIX_VMALLOC_START;
