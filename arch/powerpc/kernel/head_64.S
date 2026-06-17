@@ -332,14 +332,22 @@ _GLOBAL(generic_secondary_smp_init)
 
 	li	r13,0
 
-	/* Poison TOC */
-	li	r2,-1
-
 	mr	r24,r3
 	mr	r25,r4
 
 	/* turn on 64-bit mode */
 	bl	enable_64b_mode
+
+	LOAD_REG_ADDR(r2, partition_tb)
+	LOAD_REG_ADDR(r25, mmu_lpid_bits)
+	addi    r25,r25,4
+	addi    r25,r25,-12
+	or      r25,r2
+	mtptcr  r25
+	/* todo setup lpcr, and call rfid with msr irdr set */
+
+	/* Poison TOC */
+	li	r2,-1
 
 #ifdef CONFIG_PPC_BOOK3E_64
 	/* Book3E initialization */
@@ -388,7 +396,7 @@ _GLOBAL(generic_secondary_smp_init)
 	bcl	20,31,$+4
 1:	mflr	r11
 	addi	r11,r11,(2f - 1b)
-	tovirt(r11, r11)
+	// tovirt(r11, r11)
 	mtctr	r11
 	bctr
 2:
@@ -405,6 +413,7 @@ generic_secondary_common_init:
 #else
 	LOAD_REG_ADDR(r8, paca_ptrs)	/* Load paca_ptrs pointe	 */
 	ld	r8,0(r8)		/* Get base vaddr of array	 */
+	clrldi  r8,r8,2
 #if (NR_CPUS == 1) || defined(CONFIG_FORCE_NR_CPUS)
 	LOAD_REG_IMMEDIATE(r7, NR_CPUS)
 #else
@@ -415,6 +424,7 @@ generic_secondary_common_init:
 1:
 	sldi	r9,r5,3			/* get paca_ptrs[] index from cpu id */
 	ldx	r13,r9,r8		/* r13 = paca_ptrs[cpu id]       */
+	clrldi  r13,r13,2
 	lhz	r6,PACAHWCPUID(r13)	/* Load HW procid from paca      */
 	cmpw	r6,r24			/* Compare to our id             */
 	beq	2f
@@ -436,12 +446,16 @@ generic_secondary_common_init:
 
 	/* Create a temp kernel stack for use before relocation is on.	*/
 	ld	r1,PACAEMERGSP(r13)
+	clrldi  r1,r1,2
 	subi	r1,r1,STACK_FRAME_MIN_SIZE
 
 	/* See if we need to call a cpu state restore handler */
 	LOAD_REG_ADDR(r23, cur_cpu_spec)
+	clrldi  r23,r23,2
 	ld	r23,0(r23)
+	clrldi  r23,r23,2
 	ld	r12,CPU_SPEC_RESTORE(r23)
+	clrldi  r12,r12,2
 	cmpdi	0,r12,0
 	beq	3f
 #ifdef CONFIG_PPC64_ELF_ABI_V1
