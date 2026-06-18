@@ -52,6 +52,7 @@
  */
 struct prtb_entry *process_tb;
 struct patb_entry *partition_tb;
+EXPORT_SYMBOL(partition_tb);
 /*
  * page table size
  */

@@ -330,6 +330,8 @@ _GLOBAL(fsl_secondary_thread_init)
 _GLOBAL(generic_secondary_smp_init)
 	FIXUP_ENDIAN
 
+	/* Poison TOC */
+	li	r2,-1
 	li	r13,0
 
 	mr	r24,r3
@@ -337,17 +339,6 @@ _GLOBAL(generic_secondary_smp_init)
 
 	/* turn on 64-bit mode */
 	bl	enable_64b_mode
-
-	LOAD_REG_ADDR(r2, partition_tb)
-	LOAD_REG_ADDR(r25, mmu_lpid_bits)
-	addi    r25,r25,4
-	addi    r25,r25,-12
-	or      r25,r2
-	mtptcr  r25
-	/* todo setup lpcr, and call rfid with msr irdr set */
-
-	/* Poison TOC */
-	li	r2,-1
 
 #ifdef CONFIG_PPC_BOOK3E_64
 	/* Book3E initialization */
@@ -404,6 +395,24 @@ _GLOBAL(generic_secondary_smp_init)
 #endif
 
 generic_secondary_common_init:
+
+	li      r17,0
+	li      r18,0
+	LOAD_REG_ADDR(r17, partition_tb)
+	clrldi  r17,r17,2
+	ld      r17,0(r17)
+	clrldi  r17,r17,2
+	LOAD_REG_ADDR(r18, mmu_lpid_bits)
+	clrldi  r18,r18,2
+	ld      r18,0(r18)
+	clrldi  r18,r18,32
+	addi    r18,r18,4
+	addi    r18,r18,-12
+	or      r18,r18,r17
+	mtptcr  r18
+
+	/* todo setup lpcr, and call rfid with msr irdr set */
+
 	/* Set up a paca value for this processor. Since we have the
 	 * physical cpu id in r24, we need to search the pacas to find
 	 * which logical id maps to our physical one.
@@ -895,10 +904,6 @@ __secondary_start:
  */
 start_secondary_prolog:
 
-	    li      r9,1
-	    rotldi  r3,r9,32
-
-	mthrmor r3
 
 	LOAD_PACA_TOC()
 	li	r3,0
@@ -1073,7 +1078,7 @@ start_here_common:
 
 
     li      r9,1
-    rotldi  r3,r9,32
+	    rotldi  r3,r9,32
 
 	mthrmor r3
 
