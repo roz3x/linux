@@ -411,6 +411,22 @@ generic_secondary_common_init:
 	or      r18,r18,r17
 	mtptcr  r18
 
+	mflpcr  r17
+	oris    r17,r17,80
+	mtlpcr  r17
+
+	mfmsr   r18
+	ori     r18,r18,48
+	bl      $+4
+	mflr    r17
+	addi    r17,r17,32
+	li      r16,-1
+	clrrdi  r16,r16,62
+	or      r17,r17,r16
+	mtsrr0  r17
+	mtsrr1  r18
+	rfid
+
 	/* todo setup lpcr, and call rfid with msr irdr set */
 
 	/* Set up a paca value for this processor. Since we have the
