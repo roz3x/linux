@@ -449,7 +449,7 @@ generic_secondary_common_init:
 1:
 	sldi	r9,r5,3			/* get paca_ptrs[] index from cpu id */
 	ldx	r13,r9,r8		/* r13 = paca_ptrs[cpu id]       */
-	clrldi  r13,r13,2
+	// clrldi  r13,r13,2
 	lhz	r6,PACAHWCPUID(r13)	/* Load HW procid from paca      */
 	cmpw	r6,r24			/* Compare to our id             */
 	beq	2f
@@ -908,6 +908,10 @@ __secondary_start:
 	LOAD_REG_ADDR(r3, start_secondary_prolog)
 	LOAD_REG_IMMEDIATE(r4, MSR_KERNEL)
 
+	li      r17, -1
+	clrrdi  r17, r17, 62
+	or      r3, r17, r3
+	or      r13, r17, r13
 	mtspr	SPRN_SRR0,r3
 	mtspr	SPRN_SRR1,r4
 	RFI_TO_KERNEL
