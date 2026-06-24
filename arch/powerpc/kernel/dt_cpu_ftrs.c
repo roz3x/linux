@@ -77,7 +77,12 @@ static void (*init_pmu_registers)(void);
 
 static void __restore_cpu_cpufeatures(void)
 {
-	mtspr(SPRN_LPCR, system_registers.lpcr);
+	/* if radix was enabled early 
+	 * then dont restore LPCR
+	 */
+	if (!(mfspr(SPRN_LPCR) & LPCR_HR))
+		mtspr(SPRN_LPCR, system_registers.lpcr);
+
 	if (hv_mode) {
 		mtspr(SPRN_LPID, 0);
 		mtspr(SPRN_AMOR, ~0);

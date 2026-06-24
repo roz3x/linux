@@ -713,6 +713,16 @@ void __init radix__early_init_mmu(void)
 void radix__early_init_mmu_secondary(void)
 {
 	unsigned long lpcr;
+
+	/* Make sure userspace can't change the AMR */
+	mtspr(SPRN_UAMOR, 0);
+
+	/* early enabled
+	 */
+	if (mfspr(SPRN_LPCR) & LPCR_HR) {
+		return;
+	}
+
 	/*
 	 * update partition table control register and UPRT
 	 */
@@ -727,8 +737,6 @@ void radix__early_init_mmu_secondary(void)
 	radix__switch_mmu_context(NULL, &init_mm);
 	tlbiel_all();
 
-	/* Make sure userspace can't change the AMR */
-	mtspr(SPRN_UAMOR, 0);
 }
 
 /* Called during kexec sequence with MMU off */
