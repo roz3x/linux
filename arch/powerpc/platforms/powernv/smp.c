@@ -110,6 +110,8 @@ static int pnv_smp_kick_cpu(int nr)
 			pr_warn("OPAL Error %ld starting CPU %d\n", rc, nr);
 			return -ENODEV;
 		}
+		/* hrmor only? */
+		opal_pci_reset(0, OPAL_RESET_PCI_IODA_TABLE, OPAL_ASSERT_RESET);
 	} else {
 		/*
 		 * An unavailable CPU (or any other unknown status)
