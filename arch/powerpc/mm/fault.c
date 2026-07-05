@@ -218,7 +218,7 @@ static bool bad_kernel_fault(struct pt_regs *regs, unsigned long error_code,
 
 	// Read/write fault blocked by KUAP is bad, it can never succeed.
 	if (bad_kuap_fault(regs, address, is_write)) {
-		pr_crit_ratelimited("Kernel attempted to %s user page (%lx) - exploit attempt? (uid: %d)\n",
+		pr_crit_ratelimited("Kernel attempted to %s user page (0x%lx) - exploit attempt? (uid: %d)\n",
 				    str_write_read(is_write), address,
 				    from_kuid(&init_user_ns, current_uid()));
 
