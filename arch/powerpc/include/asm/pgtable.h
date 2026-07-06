@@ -46,10 +46,9 @@ void set_pte_at_unchecked(struct mm_struct *mm, unsigned long addr,
 /* Keep this as a macro to avoid include dependency mess */
 #define pte_page(x)		pfn_to_page(pte_pfn(x))
 
-static inline unsigned long pte_pfn(pte_t pte)
-{
-	return (pte_val(pte) & PTE_RPN_MASK) >> PTE_RPN_SHIFT;
-}
+
+unsigned long pte_pfn(pte_t pte);
+
 
 /*
  * Select all bits except the pfn

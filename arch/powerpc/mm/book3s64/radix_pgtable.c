@@ -41,6 +41,13 @@
 
 unsigned int mmu_base_pid;
 
+inline unsigned long pte_pfn(pte_t pte)
+{
+	unsigned long pfn =  ((pte_val(pte) & PTE_RPN_MASK) >> PTE_RPN_SHIFT);
+	return pfn;
+}
+EXPORT_SYMBOL(pte_pfn);
+
 static __ref void *early_alloc_pgtable(unsigned long size, int nid,
 			unsigned long region_start, unsigned long region_end)
 {
