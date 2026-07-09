@@ -28,9 +28,15 @@ extern struct pci_dev *isa_bridge_pcidev;
 #include <asm/delay.h>
 #include <asm/mmiowb.h>
 #include <asm/mmu.h>
+#include <asm/reg.h>
 
 #define SIO_CONFIG_RA	0x398
 #define SIO_CONFIG_RD	0x399
+
+#define SET_EA_REAL(addr) \
+({ \
+	(addr) = (typeof(addr))((unsigned long)(addr) | 0x8000000000000000ULL); \
+})
 
 /* 32 bits uses slightly different variables for the various IO
  * bases. Most of this file only uses _IO_BASE though which we
@@ -94,6 +100,7 @@ extern bool isa_io_special;
 static inline u##size name(const volatile u##size __iomem *addr)	\
 {									\
 	u##size ret;							\
+	SET_EA_REAL(addr);						\
 	__asm__ __volatile__("sync;"#insn" %0,0,%1;twi 0,%0,0;isync"	\
 		: "=r" (ret) : "r" (addr) : "memory");			\
 	return ret;							\
@@ -102,6 +109,7 @@ static inline u##size name(const volatile u##size __iomem *addr)	\
 #define DEF_MMIO_OUT_X(name, size, insn)				\
 static inline void name(volatile u##size __iomem *addr, u##size val)	\
 {									\
+	SET_EA_REAL(addr);						\
 	__asm__ __volatile__("sync;"#insn" %1,0,%0"			\
 		: : "r" (addr), "r" (val) : "memory");			\
 	mmiowb_set_pending();						\
@@ -111,6 +119,7 @@ static inline void name(volatile u##size __iomem *addr, u##size val)	\
 static inline u##size name(const volatile u##size __iomem *addr)	\
 {									\
 	u##size ret;							\
+	SET_EA_REAL(addr);						\
 	__asm__ __volatile__("sync;"#insn" %0,0(%1);twi 0,%0,0;isync"\
 		: "=r" (ret) : "b" (addr) : "memory");	\
 	return ret;							\
@@ -119,6 +128,7 @@ static inline u##size name(const volatile u##size __iomem *addr)	\
 #define DEF_MMIO_OUT_D(name, size, insn)				\
 static inline void name(volatile u##size __iomem *addr, u##size val)	\
 {									\
+	SET_EA_REAL(addr);						\
 	__asm__ __volatile__("sync;"#insn" %1,0(%0)"			\
 		: : "b" (addr), "r" (val) : "memory");	\
 	mmiowb_set_pending();						\
@@ -128,6 +138,7 @@ static inline void name(volatile u##size __iomem *addr, u##size val)	\
 static inline u##size name(const volatile u##size __iomem *addr)	\
 {									\
 	u##size ret;							\
+	SET_EA_REAL(addr);						\
 	__asm__ __volatile__("sync;"#insn" %0,%y1;twi 0,%0,0;isync"	\
 		: "=r" (ret) : "Z" (*addr) : "memory");			\
 	return ret;							\
@@ -136,6 +147,7 @@ static inline u##size name(const volatile u##size __iomem *addr)	\
 #define DEF_MMIO_OUT_X(name, size, insn)				\
 static inline void name(volatile u##size __iomem *addr, u##size val)	\
 {									\
+	SET_EA_REAL(addr);						\
 	__asm__ __volatile__("sync;"#insn" %1,%y0"			\
 		: "=Z" (*addr) : "r" (val) : "memory");			\
 	mmiowb_set_pending();						\
@@ -145,6 +157,7 @@ static inline void name(volatile u##size __iomem *addr, u##size val)	\
 static inline u##size name(const volatile u##size __iomem *addr)	\
 {									\
 	u##size ret;							\
+	SET_EA_REAL(addr);						\
 	__asm__ __volatile__("sync;"#insn"%U1%X1 %0,%1;twi 0,%0,0;isync"\
 		: "=r" (ret) : "m<>" (*addr) : "memory");	\
 	return ret;							\
@@ -153,6 +166,7 @@ static inline u##size name(const volatile u##size __iomem *addr)	\
 #define DEF_MMIO_OUT_D(name, size, insn)				\
 static inline void name(volatile u##size __iomem *addr, u##size val)	\
 {									\
+	SET_EA_REAL(addr);						\
 	__asm__ __volatile__("sync;"#insn"%U0%X0 %1,%0"			\
 		: "=m<>" (*addr) : "r" (val) : "memory");	\
 	mmiowb_set_pending();						\
