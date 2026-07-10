@@ -41,6 +41,34 @@
 
 unsigned int mmu_base_pid;
 
+inline void radix__set_pte_at(struct mm_struct *mm, unsigned long addr,
+				 pte_t *ptep, pte_t pte, int percpu)
+{
+	*ptep = pte;
+
+	/*
+	 * The architecture suggests a ptesync after setting the pte, which
+	 * orders the store that updates the pte with subsequent page table
+	 * walk accesses which may load the pte. Without this it may be
+	 * possible for a subsequent access to result in spurious fault.
+	 *
+	 * This is not necessary for correctness, because a spurious fault
+	 * is tolerated by the page fault handler, and this store will
+	 * eventually be seen. In testing, there was no noticable increase
+	 * in user faults on POWER9. Avoiding ptesync here is a significant
+	 * win for things like fork. If a future microarchitecture benefits
+	 * from ptesync, it should probably go into update_mmu_cache, rather
+	 * than set_pte_at (which is used to set ptes unrelated to faults).
+	 *
+	 * Spurious faults from the kernel memory are not tolerated, so there
+	 * is a ptesync in flush_cache_vmap, and __map_kernel_page() follows
+	 * the pte update sequence from ISA Book III 6.10 Translation Table
+	 * Update Synchronization Requirements.
+	 */
+}
+/* TODO: check if this required? */
+EXPORT_SYMBOL(radix__set_pte_at);
+
 inline unsigned long pte_pfn(pte_t pte)
 {
 	unsigned long pfn =  ((pte_val(pte) & PTE_RPN_MASK) >> PTE_RPN_SHIFT);
