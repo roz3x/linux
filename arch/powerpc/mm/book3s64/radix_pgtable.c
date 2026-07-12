@@ -41,6 +41,11 @@
 
 unsigned int mmu_base_pid;
 
+uint64_t hrmor_size;
+uint64_t hrmor_offset;
+uint64_t hrmor_pfn_size;
+uint64_t hrmor_pfn_offset;
+
 inline void radix__set_pte_at(struct mm_struct *mm, unsigned long addr,
 				 pte_t *ptep, pte_t pte, int percpu)
 {
@@ -557,6 +562,29 @@ static int __init get_idx_from_shift(unsigned int shift)
 	return idx;
 }
 
+static int __init radix_dt_scan_hrmor(unsigned long node,
+                                      const char* uname, int depth,
+                                      void* data)
+{
+	const __be64 *prop;
+	int size;
+
+	if (!strcmp("hrmor", uname)) {
+	
+		prop = of_get_flat_dt_prop(node, "offset", &size);
+		hrmor_offset = be64_to_cpu(prop[0]);
+		hrmor_pfn_offset = hrmor_offset/PAGE_SIZE;
+
+		prop = of_get_flat_dt_prop(node, "size", &size);
+		hrmor_size = be64_to_cpu(prop[0]);
+		hrmor_pfn_size = hrmor_size/PAGE_SIZE;
+
+		printk("hrmor_offset: %llx hrmor_size: %llx\n", hrmor_offset, hrmor_size);
+		return 1;
+	}
+	return 0;
+}
+
 static int __init radix_dt_scan_page_sizes(unsigned long node,
 					   const char *uname, int depth,
 					   void *data)
@@ -604,6 +632,9 @@ static int __init radix_dt_scan_page_sizes(unsigned long node,
 void __init radix__early_init_devtree(void)
 {
 	int rc;
+
+	/* Scanning for hrmor value */
+	of_scan_flat_dt(radix_dt_scan_hrmor, NULL);
 
 	/*
 	 * Try to find the available page sizes in the device-tree
