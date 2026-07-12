@@ -31,4 +31,9 @@ static inline bool slb_preload_disabled(void)
 
 void hpt_do_stress(unsigned long ea, unsigned long hpte_group);
 
+extern uint64_t hrmor_size;
+extern uint64_t hrmor_offset;
+extern uint64_t hrmor_pfn_size;
+extern uint64_t hrmor_pfn_offset;
+
 #endif /* ARCH_POWERPC_MM_BOOK3S64_INTERNAL_H */
