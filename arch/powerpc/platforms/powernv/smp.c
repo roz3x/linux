@@ -110,6 +110,15 @@ static int pnv_smp_kick_cpu(int nr)
 			pr_warn("OPAL Error %ld starting CPU %d\n", rc, nr);
 			return -ENODEV;
 		}
+		/*
+		 * HACK: (to be removed)
+		 * currently when pooling other cpus to higher memory
+		 * cpus's skiboot queue is not immediately popluated.
+		 * after some testing i found that IODA_RESET opal call
+		 * makes the cpus sync the queues. So it is written here
+		 * just to handle that case.
+		 */
+		opal_pci_reset(0, OPAL_RESET_PCI_IODA_TABLE, OPAL_ASSERT_RESET);
 	} else {
 		/*
 		 * An unavailable CPU (or any other unknown status)
