@@ -49,7 +49,20 @@ uint64_t hrmor_pfn_offset;
 inline void radix__set_pte_at(struct mm_struct *mm, unsigned long addr,
 				 pte_t *ptep, pte_t pte, int percpu)
 {
-	*ptep = pte;
+	/*
+	 * Nudge the pfn so it sits somewhere between the "REAL" pages
+	 */
+
+	uint64_t pfn = pte_pfn(pte);
+	uint64_t flags = pte_val(pte) & ~PTE_RPN_MASK;
+
+	if (pfn < hrmor_pfn_offset)
+	        pfn = pfn + hrmor_pfn_offset;
+
+	pfn <<= PAGE_SHIFT;
+	pfn &= PTE_RPN_MASK;
+
+	*ptep = __pte(pfn | flags);
 
 	/*
 	 * The architecture suggests a ptesync after setting the pte, which
@@ -77,6 +90,14 @@ EXPORT_SYMBOL(radix__set_pte_at);
 inline unsigned long pte_pfn(pte_t pte)
 {
 	unsigned long pfn =  ((pte_val(pte) & PTE_RPN_MASK) >> PTE_RPN_SHIFT);
+
+	/*
+	 * As this is a previously "Nudged" value, we remove the pfn_offset
+	 * if it is in the expected range.
+	 */
+	if (pfn <= hrmor_pfn_size + hrmor_pfn_offset && pfn >= hrmor_pfn_offset)
+		pfn -= hrmor_pfn_offset;
+
 	return pfn;
 }
 EXPORT_SYMBOL(pte_pfn);
@@ -509,7 +530,7 @@ static void __init radix_init_pgtable(void)
 	 * Fill in the process table.
 	 */
 	rts_field = radix__get_tree_size();
-	process_tb->prtb0 = cpu_to_be64(rts_field | __pa(init_mm.pgd) | RADIX_PGD_INDEX_SIZE);
+	process_tb->prtb0 = cpu_to_be64(rts_field | __pa(init_mm.pgd) | hrmor_offset | RADIX_PGD_INDEX_SIZE);
 
 	/*
 	 * The init_mm context is given the first available (non-zero) PID,
@@ -534,7 +555,7 @@ static void __init radix_init_partition_table(void)
 
 	mmu_partition_table_init();
 	rts_field = radix__get_tree_size();
-	dw0 = rts_field | __pa(init_mm.pgd) | RADIX_PGD_INDEX_SIZE | PATB_HR;
+	dw0 = rts_field | __pa(init_mm.pgd) | hrmor_offset | RADIX_PGD_INDEX_SIZE | PATB_HR;
 	dw1 = __pa(process_tb) | (PRTB_SIZE_SHIFT - 12) | PATB_GR;
 	mmu_partition_table_set_entry(0, dw0, dw1, false);
 
@@ -683,9 +704,13 @@ void __init radix__early_init_mmu(void)
 	__pud_table_size = RADIX_PUD_TABLE_SIZE;
 	__pgd_table_size = RADIX_PGD_TABLE_SIZE;
 
-	__pmd_val_bits = RADIX_PMD_VAL_BITS;
-	__pud_val_bits = RADIX_PUD_VAL_BITS;
-	__pgd_val_bits = RADIX_PGD_VAL_BITS;
+	__pmd_val_bits = RADIX_PMD_VAL_BITS | hrmor_offset;
+	__pud_val_bits = RADIX_PUD_VAL_BITS | hrmor_offset;
+	__pgd_val_bits = RADIX_PGD_VAL_BITS | hrmor_offset;
+
+	__pmd_masked_bits = 0xc0000000000000ffUL | hrmor_offset;
+	__pud_masked_bits = 0xc0000000000000ffUL | hrmor_offset;
+	__pgd_masked_bits = 0xc0000000000000ffUL | hrmor_offset;
 
 	__kernel_virt_start = RADIX_KERN_VIRT_START;
 	__vmalloc_start = RADIX_VMALLOC_START;
