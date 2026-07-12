@@ -177,6 +177,13 @@ extern unsigned long __pgd_table_size;
 extern unsigned long __pmd_val_bits;
 extern unsigned long __pud_val_bits;
 extern unsigned long __pgd_val_bits;
+
+extern unsigned long __pmd_masked_bits;
+extern unsigned long __pud_masked_bits;
+extern unsigned long __pgd_masked_bits;
+extern unsigned long __pte_rpn_mask;
+extern unsigned long __page_pte;
+
 #define PMD_VAL_BITS	__pmd_val_bits
 #define PUD_VAL_BITS	__pud_val_bits
 #define PGD_VAL_BITS	__pgd_val_bits
@@ -220,11 +227,11 @@ extern unsigned long __pmd_frag_size_shift;
 #define PGDIR_MASK	(~(PGDIR_SIZE-1))
 
 /* Bits to mask out from a PMD to get to the PTE page */
-#define PMD_MASKED_BITS		0xc0000000000000ffUL
+#define PMD_MASKED_BITS		__pmd_masked_bits
 /* Bits to mask out from a PUD to get to the PMD page */
-#define PUD_MASKED_BITS		0xc0000000000000ffUL
+#define PUD_MASKED_BITS		__pud_masked_bits
 /* Bits to mask out from a PGD to get to the PUD page */
-#define P4D_MASKED_BITS		0xc0000000000000ffUL
+#define P4D_MASKED_BITS		__pgd_masked_bits
 
 /*
  * Used as an indicator for rcu callback functions
