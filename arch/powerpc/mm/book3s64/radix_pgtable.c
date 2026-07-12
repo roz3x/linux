@@ -752,6 +752,13 @@ void radix__early_init_mmu_secondary(void)
 	/* Make sure userspace can't change the AMR */
 	mtspr(SPRN_UAMOR, 0);
 
+	/* if Host Radix is ready set, then we dont need
+	 * to follow thru with full initialization.
+	 */
+	if (mfspr(SPRN_LPCR) & LPCR_HR) {
+		return;
+	}
+
 	/*
 	 * update partition table control register and UPRT
 	 */

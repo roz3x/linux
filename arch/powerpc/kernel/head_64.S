@@ -388,7 +388,6 @@ _GLOBAL(generic_secondary_smp_init)
 	bcl	20,31,$+4
 1:	mflr	r11
 	addi	r11,r11,(2f - 1b)
-	tovirt(r11, r11)
 	mtctr	r11
 	bctr
 2:
@@ -396,6 +395,42 @@ _GLOBAL(generic_secondary_smp_init)
 #endif
 
 generic_secondary_common_init:
+
+	/* Logic to enable mmu early on secondary cpu.
+	 * copies the value of PTCR, LPCR from primary
+	 * cpu.
+	 */
+	li      r17,0
+	li      r18,0
+	LOAD_REG_ADDR(r17, partition_tb)
+	clrldi  r17,r17,2
+	ld      r17,0(r17)
+	clrldi  r17,r17,2
+	LOAD_REG_ADDR(r18, mmu_lpid_bits)
+	clrldi  r18,r18,2
+	ld      r18,0(r18)
+	clrldi  r18,r18,32
+	addi    r18,r18,4
+	addi    r18,r18,-12
+	or      r18,r18,r17
+	mtptcr  r18
+
+	mflpcr  r17
+	oris    r17,r17,80
+	mtlpcr  r17
+
+	mfmsr   r18
+	ori     r18,r18,48
+	bl      $+4
+	mflr    r17
+	addi    r17,r17,32
+	li      r16,-1
+	clrrdi  r16,r16,62
+	or      r17,r17,r16
+	mtsrr0  r17
+	mtsrr1  r18
+	rfid
+
 	/* Set up a paca value for this processor. Since we have the
 	 * physical cpu id in r24, we need to search the pacas to find
 	 * which logical id maps to our physical one.
@@ -868,6 +903,13 @@ __secondary_start:
 	/* enable MMU and jump to start_secondary */
 	LOAD_REG_ADDR(r3, start_secondary_prolog)
 	LOAD_REG_IMMEDIATE(r4, MSR_KERNEL)
+
+	/* Setting 0xc on paca_ptrs and the kernel jump location
+	 */
+	li      r17, -1
+	clrrdi  r17, r17, 62
+	or      r3, r17, r3
+	or      r13, r17, r13
 
 	mtspr	SPRN_SRR0,r3
 	mtspr	SPRN_SRR1,r4
