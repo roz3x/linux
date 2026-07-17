@@ -28,6 +28,7 @@
 #include <linux/io-64-nonatomic-hi-lo.h>
 #include <linux/sed-opal.h>
 
+#include "../../../arch/powerpc/mm/book3s64/internal.h"
 #include "trace.h"
 #include "nvme.h"
 
@@ -72,6 +73,15 @@
 static_assert(MAX_PRP_RANGE / NVME_CTRL_PAGE_SIZE <=
 	(1 /* prp1 */ + NVME_MAX_NR_DESCRIPTORS * PRPS_PER_PAGE));
 
+static inline dma_addr_t nvme_pci_to_dev_addr(dma_addr_t addr)
+{
+	return addr | hrmor_offset;
+}
+
+static inline dma_addr_t nvme_dev_to_pci_addr(dma_addr_t addr)
+{
+	return addr & ~hrmor_offset;
+}
 struct quirk_entry {
 	u16 vendor_id;
 	u16 dev_id;
@@ -536,8 +546,8 @@ static void nvme_dbbuf_set(struct nvme_dev *dev)
 		return;
 
 	c.dbbuf.opcode = nvme_admin_dbbuf;
-	c.dbbuf.prp1 = cpu_to_le64(dev->dbbuf_dbs_dma_addr);
-	c.dbbuf.prp2 = cpu_to_le64(dev->dbbuf_eis_dma_addr);
+	c.dbbuf.prp1 = cpu_to_le64(nvme_pci_to_dev_addr(dev->dbbuf_dbs_dma_addr));
+	c.dbbuf.prp2 = cpu_to_le64(nvme_pci_to_dev_addr(dev->dbbuf_eis_dma_addr));
 
 	if (nvme_submit_sync_cmd(dev->ctrl.admin_q, &c, NULL, 0)) {
 		dev_warn(dev->ctrl.device, "unable to set dbbuf\n");
@@ -831,8 +841,8 @@ static inline bool nvme_pci_cmd_use_sgl(struct nvme_command *cmd)
 static inline dma_addr_t nvme_pci_first_desc_dma_addr(struct nvme_command *cmd)
 {
 	if (nvme_pci_cmd_use_sgl(cmd))
-		return le64_to_cpu(cmd->common.dptr.sgl.addr);
-	return le64_to_cpu(cmd->common.dptr.prp2);
+		return nvme_dev_to_pci_addr(le64_to_cpu(cmd->common.dptr.sgl.addr));
+	return nvme_dev_to_pci_addr(le64_to_cpu(cmd->common.dptr.prp2));
 }
 
 static void nvme_free_descriptors(struct request *req)
@@ -1080,7 +1090,7 @@ static blk_status_t nvme_pci_setup_data_prp(struct request *req,
 
 	i = 0;
 	for (;;) {
-		prp_list[i++] = cpu_to_le64(iter->addr);
+		prp_list[i++] = cpu_to_le64(nvme_pci_to_dev_addr(iter->addr));
 		prp_len = min(length, NVME_CTRL_PAGE_SIZE);
 		if (WARN_ON_ONCE(iter->len < prp_len))
 			goto bad_sgl;
@@ -1117,7 +1127,7 @@ static blk_status_t nvme_pci_setup_data_prp(struct request *req,
 			iod->descriptors[iod->nr_descriptors++] = prp_list;
 
 			prp_list[0] = old_prp_list[i - 1];
-			old_prp_list[i - 1] = cpu_to_le64(prp_list_dma);
+			old_prp_list[i - 1] = cpu_to_le64(nvme_pci_to_dev_addr(prp_list_dma));
 			i = 1;
 		}
 	}
@@ -1127,8 +1137,8 @@ done:
 	 * nvme_unmap_data uses the DPT field in the SQE to tear down the
 	 * mapping, so initialize it even for failures.
 	 */
-	iod->cmd.common.dptr.prp1 = cpu_to_le64(prp1_dma);
-	iod->cmd.common.dptr.prp2 = cpu_to_le64(prp2_dma);
+	iod->cmd.common.dptr.prp1 = cpu_to_le64(nvme_pci_to_dev_addr(prp1_dma));
+	iod->cmd.common.dptr.prp2 = cpu_to_le64(nvme_pci_to_dev_addr(prp2_dma));
 	if (unlikely(iter->status))
 		nvme_unmap_data(req);
 	return iter->status;
@@ -1144,7 +1154,7 @@ bad_sgl:
 static void nvme_pci_sgl_set_data(struct nvme_sgl_desc *sge,
 		struct blk_dma_iter *iter)
 {
-	sge->addr = cpu_to_le64(iter->addr);
+	sge->addr = cpu_to_le64(nvme_pci_to_dev_addr(iter->addr));
 	sge->length = cpu_to_le32(iter->len);
 	sge->type = NVME_SGL_FMT_DATA_DESC << 4;
 }
@@ -1152,7 +1162,7 @@ static void nvme_pci_sgl_set_data(struct nvme_sgl_desc *sge,
 static void nvme_pci_sgl_set_seg(struct nvme_sgl_desc *sge,
 		dma_addr_t dma_addr, int entries)
 {
-	sge->addr = cpu_to_le64(dma_addr);
+	sge->addr = cpu_to_le64(nvme_pci_to_dev_addr(dma_addr));
 	sge->length = cpu_to_le32(entries * sizeof(*sge));
 	sge->type = NVME_SGL_FMT_LAST_SEG_DESC << 4;
 }
@@ -1226,17 +1236,17 @@ static blk_status_t nvme_pci_setup_data_simple(struct request *req,
 
 	if (use_sgl == SGL_FORCED || !prp_possible) {
 		iod->cmd.common.flags = NVME_CMD_SGL_METABUF;
-		iod->cmd.common.dptr.sgl.addr = cpu_to_le64(dma_addr);
+		iod->cmd.common.dptr.sgl.addr = cpu_to_le64(nvme_pci_to_dev_addr(dma_addr));
 		iod->cmd.common.dptr.sgl.length = cpu_to_le32(bv.bv_len);
 		iod->cmd.common.dptr.sgl.type = NVME_SGL_FMT_DATA_DESC << 4;
 	} else {
 		unsigned int first_prp_len = NVME_CTRL_PAGE_SIZE - prp1_offset;
 
-		iod->cmd.common.dptr.prp1 = cpu_to_le64(dma_addr);
+		iod->cmd.common.dptr.prp1 = cpu_to_le64(nvme_pci_to_dev_addr(dma_addr));
 		iod->cmd.common.dptr.prp2 = 0;
 		if (bv.bv_len > first_prp_len)
 			iod->cmd.common.dptr.prp2 =
-				cpu_to_le64(dma_addr + first_prp_len);
+				cpu_to_le64(nvme_pci_to_dev_addr(dma_addr + first_prp_len));
 	}
 
 	return BLK_STS_OK;
@@ -1333,7 +1343,7 @@ static blk_status_t nvme_pci_setup_meta_iter(struct request *req)
 	 */
 	if (!nvme_ctrl_meta_sgl_supported(&dev->ctrl) ||
 	    (entries == 1 && !(nvme_req(req)->flags & NVME_REQ_USERCMD))) {
-		iod->cmd.common.metadata = cpu_to_le64(iter.addr);
+		iod->cmd.common.metadata = cpu_to_le64(nvme_pci_to_dev_addr(iter.addr));
 		iod->meta_total_len = iter.len;
 		iod->meta_dma = iter.addr;
 		iod->meta_descriptor = NULL;
@@ -1350,7 +1360,7 @@ static blk_status_t nvme_pci_setup_meta_iter(struct request *req)
 	iod->meta_descriptor = sg_list;
 	iod->meta_dma = sgl_dma;
 	iod->cmd.common.flags = NVME_CMD_SGL_METASEG;
-	iod->cmd.common.metadata = cpu_to_le64(sgl_dma);
+	iod->cmd.common.metadata = cpu_to_le64(nvme_pci_to_dev_addr(sgl_dma));
 	if (entries == 1) {
 		iod->meta_total_len = iter.len;
 		nvme_pci_sgl_set_data(sg_list, &iter);
@@ -1381,7 +1391,7 @@ static blk_status_t nvme_pci_setup_meta_mptr(struct request *req)
 	iod->meta_dma = dma_map_bvec(nvmeq->dev->dev, &bv, rq_dma_dir(req), 0);
 	if (dma_mapping_error(nvmeq->dev->dev, iod->meta_dma))
 		return BLK_STS_IOERR;
-	iod->cmd.common.metadata = cpu_to_le64(iod->meta_dma);
+	iod->cmd.common.metadata = cpu_to_le64(nvme_pci_to_dev_addr(iod->meta_dma));
 	iod->flags |= IOD_SINGLE_META_SEGMENT;
 	return BLK_STS_OK;
 }
@@ -1761,7 +1771,7 @@ static int adapter_alloc_cq(struct nvme_dev *dev, u16 qid,
 	 * is attached to the request.
 	 */
 	c.create_cq.opcode = nvme_admin_create_cq;
-	c.create_cq.prp1 = cpu_to_le64(nvmeq->cq_dma_addr);
+	c.create_cq.prp1 = cpu_to_le64(nvme_pci_to_dev_addr(nvmeq->cq_dma_addr));
 	c.create_cq.cqid = cpu_to_le16(qid);
 	c.create_cq.qsize = cpu_to_le16(nvmeq->q_depth - 1);
 	c.create_cq.cq_flags = cpu_to_le16(flags);
@@ -1790,7 +1800,7 @@ static int adapter_alloc_sq(struct nvme_dev *dev, u16 qid,
 	 * is attached to the request.
 	 */
 	c.create_sq.opcode = nvme_admin_create_sq;
-	c.create_sq.prp1 = cpu_to_le64(nvmeq->sq_dma_addr);
+	c.create_sq.prp1 = cpu_to_le64(nvme_pci_to_dev_addr(nvmeq->sq_dma_addr));
 	c.create_sq.sqid = cpu_to_le16(qid);
 	c.create_sq.qsize = cpu_to_le16(nvmeq->q_depth - 1);
 	c.create_sq.sq_flags = cpu_to_le16(flags);
@@ -2388,8 +2398,8 @@ static int nvme_pci_configure_admin_queue(struct nvme_dev *dev)
 	aqa |= aqa << 16;
 
 	writel(aqa, dev->bar + NVME_REG_AQA);
-	lo_hi_writeq(nvmeq->sq_dma_addr, dev->bar + NVME_REG_ASQ);
-	lo_hi_writeq(nvmeq->cq_dma_addr, dev->bar + NVME_REG_ACQ);
+	lo_hi_writeq(nvme_pci_to_dev_addr(nvmeq->sq_dma_addr), dev->bar + NVME_REG_ASQ);
+	lo_hi_writeq(nvme_pci_to_dev_addr(nvmeq->cq_dma_addr), dev->bar + NVME_REG_ACQ);
 
 	result = nvme_enable_ctrl(&dev->ctrl);
 	if (result)
@@ -2530,8 +2540,8 @@ static int nvme_set_host_mem(struct nvme_dev *dev, u32 bits)
 	c.features.fid		= cpu_to_le32(NVME_FEAT_HOST_MEM_BUF);
 	c.features.dword11	= cpu_to_le32(bits);
 	c.features.dword12	= cpu_to_le32(host_mem_size);
-	c.features.dword13	= cpu_to_le32(lower_32_bits(dma_addr));
-	c.features.dword14	= cpu_to_le32(upper_32_bits(dma_addr));
+	c.features.dword13	= cpu_to_le32(lower_32_bits(nvme_pci_to_dev_addr(dma_addr)));
+	c.features.dword14	= cpu_to_le32(upper_32_bits(nvme_pci_to_dev_addr(dma_addr)));
 	c.features.dword15	= cpu_to_le32(dev->nr_host_mem_descs);
 
 	ret = nvme_submit_sync_cmd(dev->ctrl.admin_q, &c, NULL, 0);
@@ -2600,7 +2610,7 @@ static int nvme_alloc_host_mem_single(struct nvme_dev *dev, u64 size)
 	dev->nr_host_mem_descs = 1;
 
 	dev->host_mem_descs[0].addr =
-		cpu_to_le64(dev->hmb_sgt->sgl->dma_address);
+		cpu_to_le64(nvme_pci_to_dev_addr(dev->hmb_sgt->sgl->dma_address));
 	dev->host_mem_descs[0].size = cpu_to_le32(size / NVME_CTRL_PAGE_SIZE);
 	return 0;
 }
@@ -2641,7 +2651,7 @@ static int nvme_alloc_host_mem_multi(struct nvme_dev *dev, u64 preferred,
 		if (!bufs[i])
 			break;
 
-		descs[i].addr = cpu_to_le64(dma_addr);
+		descs[i].addr = cpu_to_le64(nvme_pci_to_dev_addr(dma_addr));
 		descs[i].size = cpu_to_le32(len / NVME_CTRL_PAGE_SIZE);
 		i++;
 	}
