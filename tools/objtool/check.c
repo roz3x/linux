@@ -410,7 +410,7 @@ static int decode_instructions(struct objtool_file *file)
 {
 	struct section *sec;
 	struct symbol *func;
-	unsigned long offset;
+	unsigned long offset, func_off;
 	struct instruction *insn;
 
 	for_each_sec(file->elf, sec) {
@@ -492,17 +492,26 @@ static int decode_instructions(struct objtool_file *file)
 			if (func->embedded_insn || is_alias_sym(func))
 				continue;
 
-			if (!find_insn(file, sec, func->offset)) {
+			if (func->len == 0 && is_notype_sym(func))
+				continue;
+
+			func_off = opts.ftr_fixup ?
+				func->offset - sec->sh.sh_addr : func->offset;
+
+			if (!find_insn(file, sec, func_off)) {
 				ERROR("%s(): can't find starting instruction", func->name);
 				return -1;
 			}
 
-			sym_for_each_insn(file, func, insn) {
-				insn->_sym = func;
+			for (insn = find_insn(file, sec, func_off);
+				insn && insn->offset < func_off + func->len;
+				insn = next_insn_same_sec(file, insn)) {
+				insn->sym = func;
+
 				if (is_func_sym(func) &&
 				    insn->type == INSN_ENDBR &&
 				    list_empty(&insn->call_node)) {
-					if (insn->offset == func->offset) {
+					if (insn->offset == func_off) {
 						list_add_tail(&insn->call_node, &file->endbr_list);
 						file->nr_endbr++;
 					} else {
@@ -1603,8 +1612,9 @@ static int add_jump_destinations(struct objtool_file *file)
 				continue;
 
 			ERROR_INSN(insn, "can't find jump dest instruction at %s",
-				   offstr(dest_sec, dest_off));
+				offstr(dest_sec, dest_off));
 			return -1;
+
 		}
 
 		if (!dest_sym || is_sec_sym(dest_sym)) {
@@ -1683,8 +1693,11 @@ static int add_call_destinations(struct objtool_file *file)
 				continue;
 
 			if (!insn_call_dest(insn)) {
-				ERROR_INSN(insn, "unannotated intra-function call");
-				return -1;
+				if (!opts.ftr_fixup) {
+					ERROR_INSN(insn, "unannotated intra-function call");
+					return -1;
+				}
+				continue;
 			}
 
 			if (func && !is_func_sym(insn_call_dest(insn))) {
@@ -2651,8 +2664,10 @@ int decode_file(struct objtool_file *file)
 			return -1;
 	}
 
-	if (add_jump_destinations(file))
-		return -1;
+	if (!opts.ftr_fixup) {
+		if (add_jump_destinations(file))
+			return -1;
+	}
 
 	/*
 	 * Must be before add_call_destination(); it changes INSN_CALL to
@@ -4838,6 +4853,31 @@ int check(struct objtool_file *file)
 
 	if (!nr_insns)
 		goto out;
+
+	if (opts.ftr_fixup) {
+		ret = process_alt_data(file);
+		if (ret < 0)
+			return ret;
+
+		ret = process_fixup_entries(file);
+		if (ret < 0)
+			return ret;
+
+		check_and_flatten_fixup_entries();
+
+		ret = process_exception_entries(file);
+		if (ret < 0)
+			return ret;
+
+		ret = process_bug_entries(file);
+		if (ret < 0)
+			return ret;
+
+		ret = process_alt_relocations(file);
+		if (ret < 0)
+			return ret;
+	}
+
 
 	if (opts.retpoline)
 		warnings += validate_retpoline(file);
