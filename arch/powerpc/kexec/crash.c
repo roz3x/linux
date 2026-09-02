@@ -18,6 +18,7 @@
 #include <linux/types.h>
 #include <linux/libfdt.h>
 #include <linux/memory.h>
+#include <linux/slab.h>
 
 #include <asm/processor.h>
 #include <asm/machdep.h>
@@ -28,6 +29,21 @@
 #include <asm/interrupt.h>
 #include <asm/kexec_ranges.h>
 #include <asm/crashdump-ppc64.h>
+
+static int get_fdt_index(struct kimage *image);
+
+static struct {
+	/* Backing page to swap the fdt
+	 * TODO: check if we really need these to be page aligned.
+	 */
+	u8 buf[2][PAGE_SIZE] __aligned(PAGE_SIZE);
+
+	/* Points to buf that is currently valid,
+	 * -1 if none used
+	 */
+
+	int inuse;
+} cpu_hotplug_fdt;
 
 /*
  * The primary CPU waits a while for all secondary CPUs to enter. This is to
@@ -352,6 +368,34 @@ int crash_shutdown_unregister(crash_shutdown_t handler)
 }
 EXPORT_SYMBOL(crash_shutdown_unregister);
 
+/**
+ * get_fdt_index - Loop through the kexec segment array and find
+ *		   the index of the FDT segment.
+ * @image: a pointer to kexec_crash_image
+ *
+ * Returns the index of FDT segment in the kexec segment array
+ * if found; otherwise -1.
+ */
+static int get_fdt_index(struct kimage *image)
+{
+	void *ptr;
+	unsigned long mem;
+	int i, fdt_index = -1;
+
+	/* Find the FDT segment index in kexec segment array. */
+	for (i = 0; i < image->nr_segments; i++) {
+		mem = image->segment[i].mem;
+		ptr = __va(mem);
+
+		if (ptr && fdt_magic(ptr) == FDT_MAGIC) {
+			fdt_index = i;
+			break;
+		}
+	}
+
+	return fdt_index;
+}
+
 void default_machine_crash_shutdown(struct pt_regs *regs)
 {
 	volatile unsigned int i;
@@ -372,6 +416,12 @@ void default_machine_crash_shutdown(struct pt_regs *regs)
 	crash_kexec_wait_realmode(crashing_cpu);
 
 	machine_kexec_mask_interrupts();
+
+	if (cpu_hotplug_fdt.inuse != -1) {
+		int fdt_index = get_fdt_index(kexec_crash_image);
+		memcpy(__va((void *)kexec_crash_image->segment[fdt_index].mem),
+		       cpu_hotplug_fdt.buf[cpu_hotplug_fdt.inuse], PAGE_SIZE);
+	}
 
 	/*
 	 * Call registered shutdown routines safely.  Swap out
@@ -554,33 +604,82 @@ out:
 	kvfree(elfbuf);
 }
 
-/**
- * get_fdt_index - Loop through the kexec segment array and find
- *		   the index of the FDT segment.
- * @image: a pointer to kexec_crash_image
- *
- * Returns the index of FDT segment in the kexec segment array
- * if found; otherwise -1.
+/* We require 2 buffers because of the folloiwing case
+
+   - Any call from cpuhotplug will only change this buffer, not
+   the kimage region.
+
+   - Now this buf holds a valid fdt for the reboot, But if we get
+   another call from cpuhotplug, we need some space to keep the updates
+   and the valid fdt buffer. we can't empty this buffer. So
+   we Keep a spare buffer. On subsequent calls, we cycle between
+   the buffers to always keep one valid fdt buffer at all times.
+
  */
-static int get_fdt_index(struct kimage *image)
-{
-	void *ptr;
-	unsigned long mem;
-	int i, fdt_index = -1;
 
-	/* Find the FDT segment index in kexec segment array. */
-	for (i = 0; i < image->nr_segments; i++) {
-		mem = image->segment[i].mem;
-		ptr = __va(mem);
+static int get_scratch_buf(void) {
+	int fdt_index;
 
-		if (ptr && fdt_magic(ptr) == FDT_MAGIC) {
-			fdt_index = i;
-			break;
-		}
+	if (cpu_hotplug_fdt.inuse != -1) {
+		int bufidx = 1 - cpu_hotplug_fdt.inuse;
+
+		/* Copy the fdt from other buf */
+		memcpy(cpu_hotplug_fdt.buf[bufidx], cpu_hotplug_fdt.buf[1 - bufidx], PAGE_SIZE);
+
+		return bufidx;
 	}
 
-	return fdt_index;
+	/* Memcpy the original fdt here */
+	fdt_index = get_fdt_index(kexec_crash_image);
+	if (fdt_index < 0) {
+		/* TODO: panic case */
+	}
+
+	memcpy(cpu_hotplug_fdt.buf[0], __va((void *)kexec_crash_image->segment[fdt_index].mem), PAGE_SIZE);
+	return 0;
 }
+
+
+/* Update one of the backing fdt buffers.
+   Called synchronously.
+ */
+static void lockless_work(struct work_struct *work) {
+	
+	int bufidx = get_scratch_buf();
+
+	update_cpus_node(cpu_hotplug_fdt.buf[bufidx]);
+
+	cpu_hotplug_fdt.inuse = bufidx;
+}
+
+static struct workqueue_struct *crash_wq;
+
+void lockless_crash_init(void);
+
+/* Inialize ordered workqueue for handling fdt update
+ */
+void lockless_crash_init(void) {
+
+	crash_wq = alloc_ordered_workqueue("crash_wq", 0);
+	cpu_hotplug_fdt.inuse = -1;
+
+}
+
+EXPORT_SYMBOL(lockless_crash_init);
+
+void lockless_crash_update_fdt(void);
+void lockless_crash_update_fdt(void) {
+	
+
+	bool queued;
+	struct work_struct *work = kmalloc(sizeof(*work), GFP_KERNEL);
+	INIT_WORK(work, lockless_work);
+	queued = queue_work(crash_wq, work);
+	printk("queued -> %d\n", queued);
+
+}
+
+EXPORT_SYMBOL(lockless_crash_update_fdt);
 
 /**
  * update_crash_fdt - updates the cpus node of the crash FDT.

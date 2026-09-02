@@ -548,6 +548,7 @@ int crash_check_hotplug_support(void)
 	return rc;
 }
 
+void lockless_crash_update_fdt(void);
 /*
  * To accurately reflect hot un/plug changes of CPU and Memory resources
  * (including onling and offlining of those resources), the relevant
@@ -573,6 +574,19 @@ static void crash_handle_hotplug_event(unsigned int hp_action, unsigned int cpu,
 {
 	struct kimage *image;
 
+	/* Check kdump is not loaded */
+	if (!kexec_crash_image)
+		return;
+
+	/* Check that kexec segments update is permitted */
+	if (!image->hotplug_support)
+		return;
+
+
+	/* we want a lock less version here */
+	lockless_crash_update_fdt();
+	return;
+	
 	crash_hotplug_lock();
 	/* Obtain lock while changing crash information */
 	if (!kexec_trylock()) {
@@ -582,15 +596,7 @@ static void crash_handle_hotplug_event(unsigned int hp_action, unsigned int cpu,
 		return;
 	}
 
-	/* Check kdump is not loaded */
-	if (!kexec_crash_image)
-		goto out;
-
 	image = kexec_crash_image;
-
-	/* Check that kexec segments update is permitted */
-	if (!image->hotplug_support)
-		goto out;
 
 	if (hp_action == KEXEC_CRASH_HP_ADD_CPU ||
 		hp_action == KEXEC_CRASH_HP_REMOVE_CPU)

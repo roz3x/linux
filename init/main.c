@@ -968,6 +968,8 @@ static void __init print_kernel_cmdline(const char *cmdline)
 		pr_notice("%s%s\n", KERNEL_CMDLINE_PREFIX, cmdline);
 }
 
+void lockless_crash_init(void);
+
 asmlinkage __visible __init __no_sanitize_address __noreturn __no_stack_protector
 void start_kernel(void)
 {
@@ -1171,6 +1173,7 @@ void start_kernel(void)
 	arch_post_acpi_subsys_init();
 	kcsan_init();
 
+	lockless_crash_init();
 	/* Do the rest non-__init'ed, we're now alive */
 	rest_init();
 
