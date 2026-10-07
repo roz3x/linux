@@ -30,20 +30,32 @@
 #include <asm/kexec_ranges.h>
 #include <asm/crashdump-ppc64.h>
 
-static int get_fdt_index(struct kimage *image);
-
-static struct {
-	/* Backing page to swap the fdt
-	 * TODO: check if we really need these to be page aligned.
-	 */
-	u8 buf[2][PAGE_SIZE] __aligned(PAGE_SIZE);
-
-	/* Points to buf that is currently valid,
-	 * -1 if none used
-	 */
-
+#ifdef CONFIG_CRASH_HOTPLUG
+/*
+ * Double-buffer for deferred FDT updates on CPU hotplug (DLPAR) events.
+ *
+ * The workqueue worker always writes into the inactive buffer, then
+ * publishes it with smp_store_release(&fdt_buf.inuse, bufidx).  The crash
+ * shutdown path reads inuse with smp_load_acquire() to obtain the
+ * producer's stores before flushing the buffer into the kexec segment.
+ *
+ * The ordered workqueue ensures only one worker runs at a time, so the
+ * two-buffer scheme guarantees the reader always sees a complete FDT:
+ * while the worker updates buf[inactive], buf[inuse] remains valid.
+ *
+ * inuse == -1 means no deferred update is pending (no hotplug since load).
+ *
+ * Buffer size is set at init time from the actual FDT segment memsz.
+ */
+static struct crash_fdt_buf {
+	u8 *buf[2];
+	size_t size;
+	/* index of the last fully-written buffer; -1 if none */
 	int inuse;
-} cpu_hotplug_fdt;
+} fdt_buf;
+
+static struct workqueue_struct *crash_fdt_wq;
+#endif /* CONFIG_CRASH_HOTPLUG */
 
 /*
  * The primary CPU waits a while for all secondary CPUs to enter. This is to
@@ -368,6 +380,7 @@ int crash_shutdown_unregister(crash_shutdown_t handler)
 }
 EXPORT_SYMBOL(crash_shutdown_unregister);
 
+#ifdef CONFIG_CRASH_HOTPLUG
 /**
  * get_fdt_index - Loop through the kexec segment array and find
  *		   the index of the FDT segment.
@@ -375,26 +388,30 @@ EXPORT_SYMBOL(crash_shutdown_unregister);
  *
  * Returns the index of FDT segment in the kexec segment array
  * if found; otherwise -1.
+ *
+ * Uses kmap_local_page() so it is safe regardless of where the segment
+ * physically resides (including above the direct-map limit).
  */
 static int get_fdt_index(struct kimage *image)
 {
-	void *ptr;
-	unsigned long mem;
 	int i, fdt_index = -1;
 
-	/* Find the FDT segment index in kexec segment array. */
 	for (i = 0; i < image->nr_segments; i++) {
-		mem = image->segment[i].mem;
-		ptr = __va(mem);
+		unsigned long mem = image->segment[i].mem;
+		void *ptr = kmap_local_page(pfn_to_page(mem >> PAGE_SHIFT));
 
-		if (ptr && fdt_magic(ptr) == FDT_MAGIC) {
-			fdt_index = i;
-			break;
+		if (ptr) {
+			if (fdt_magic(ptr) == FDT_MAGIC)
+				fdt_index = i;
+			kunmap_local(ptr);
 		}
+		if (fdt_index >= 0)
+			break;
 	}
 
 	return fdt_index;
 }
+#endif /* CONFIG_CRASH_HOTPLUG */
 
 void default_machine_crash_shutdown(struct pt_regs *regs)
 {
@@ -417,11 +434,35 @@ void default_machine_crash_shutdown(struct pt_regs *regs)
 
 	machine_kexec_mask_interrupts();
 
-	if (cpu_hotplug_fdt.inuse != -1) {
-		int fdt_index = get_fdt_index(kexec_crash_image);
-		memcpy(__va((void *)kexec_crash_image->segment[fdt_index].mem),
-		       cpu_hotplug_fdt.buf[cpu_hotplug_fdt.inuse], PAGE_SIZE);
+#ifdef CONFIG_CRASH_HOTPLUG
+	/*
+	 * Drain any pending deferred FDT update before jumping.  The ordered
+	 * workqueue ensures the worker has finished writing fdt_buf.buf[inuse]
+	 * before flush_workqueue() returns.
+	 */
+	if (crash_fdt_wq)
+		flush_workqueue(crash_fdt_wq);
+
+	/*
+	 * Publish the latest deferred FDT buffer into the kexec segment.
+	 * smp_load_acquire() pairs with smp_store_release() in the worker.
+	 */
+	{
+		int pending = smp_load_acquire(&fdt_buf.inuse);
+
+		if (pending != -1) {
+			int fdt_index = get_fdt_index(kexec_crash_image);
+
+			if (fdt_index >= 0) {
+				void *dst = __va(kexec_crash_image->segment[fdt_index].mem);
+
+				memcpy(dst, fdt_buf.buf[pending], fdt_buf.size);
+			} else {
+				pr_err("crash_shutdown: FDT segment not found, kdump FDT may be stale\n");
+			}
+		}
 	}
+#endif /* CONFIG_CRASH_HOTPLUG */
 
 	/*
 	 * Call registered shutdown routines safely.  Swap out
@@ -604,111 +645,108 @@ out:
 	kvfree(elfbuf);
 }
 
-/* We require 2 buffers because of the folloiwing case
-
-   - Any call from cpuhotplug will only change this buffer, not
-   the kimage region.
-
-   - Now this buf holds a valid fdt for the reboot, But if we get
-   another call from cpuhotplug, we need some space to keep the updates
-   and the valid fdt buffer. we can't empty this buffer. So
-   we Keep a spare buffer. On subsequent calls, we cycle between
-   the buffers to always keep one valid fdt buffer at all times.
-
+/*
+ * crash_fdt_buf_get_scratch - return the index of the buffer to write into next.
+ *
+ * The ordered workqueue serialises callers, so no additional locking is
+ * needed here.  On the first call (inuse == -1) buf[0] is seeded from the
+ * live kexec segment so subsequent update_cpus_node() calls work on a
+ * complete FDT.  On every subsequent call the *other* buffer is seeded from
+ * the last published one, so the reader always has a complete copy.
+ *
+ * Returns the scratch buffer index, or -1 on error (FDT segment not found).
  */
+static int crash_fdt_buf_get_scratch(void)
+{
+	int cur = smp_load_acquire(&fdt_buf.inuse);
 
-static int get_scratch_buf(void) {
-	int fdt_index;
+	if (cur != -1) {
+		int next = 1 - cur;
 
-	if (cpu_hotplug_fdt.inuse != -1) {
-		int bufidx = 1 - cpu_hotplug_fdt.inuse;
-
-		/* Copy the fdt from other buf */
-		memcpy(cpu_hotplug_fdt.buf[bufidx], cpu_hotplug_fdt.buf[1 - bufidx], PAGE_SIZE);
-
-		return bufidx;
+		memcpy(fdt_buf.buf[next], fdt_buf.buf[cur], fdt_buf.size);
+		return next;
 	}
 
-	/* Memcpy the original fdt here */
-	fdt_index = get_fdt_index(kexec_crash_image);
-	if (fdt_index < 0) {
-		/* TODO: panic case */
-	}
+	/* First update: seed buf[0] from the live kexec segment. */
+	{
+		int fdt_index = get_fdt_index(kexec_crash_image);
 
-	memcpy(cpu_hotplug_fdt.buf[0], __va((void *)kexec_crash_image->segment[fdt_index].mem), PAGE_SIZE);
+		if (fdt_index < 0) {
+			pr_err("crash_fdt: FDT segment not found, cannot update\n");
+			return -1;
+		}
+		memcpy(fdt_buf.buf[0],
+		       __va(kexec_crash_image->segment[fdt_index].mem),
+		       fdt_buf.size);
+	}
 	return 0;
 }
 
-
-/* Update one of the backing fdt buffers.
-   Called synchronously.
+/*
+ * crash_fdt_deferred_work - workqueue handler for CPU hotplug FDT updates.
+ *
+ * Runs in the ordered crash_fdt_wq, so only one instance is active at a
+ * time.  Writes into the inactive buffer then atomically publishes it via
+ * smp_store_release so the crash shutdown reader always sees a complete FDT.
  */
-static void lockless_work(struct work_struct *work) {
-	
-	int bufidx = get_scratch_buf();
+static void crash_fdt_deferred_work(struct work_struct *work)
+{
+	int bufidx = crash_fdt_buf_get_scratch();
 
-	update_cpus_node(cpu_hotplug_fdt.buf[bufidx]);
+	if (bufidx < 0)
+		goto out;
 
-	cpu_hotplug_fdt.inuse = bufidx;
+	if (update_cpus_node(fdt_buf.buf[bufidx]))
+		pr_err("crash_fdt: failed to update cpus node\n");
+	else
+		smp_store_release(&fdt_buf.inuse, bufidx);
+out:
+	kfree(work);
 }
-
-static struct workqueue_struct *crash_wq;
-
-void lockless_crash_init(void);
-
-/* Inialize ordered workqueue for handling fdt update
- */
-void lockless_crash_init(void) {
-
-	crash_wq = alloc_ordered_workqueue("crash_wq", 0);
-	cpu_hotplug_fdt.inuse = -1;
-
-}
-
-EXPORT_SYMBOL(lockless_crash_init);
-
-void lockless_crash_update_fdt(void);
-void lockless_crash_update_fdt(void) {
-	
-
-	bool queued;
-	struct work_struct *work = kmalloc(sizeof(*work), GFP_KERNEL);
-	INIT_WORK(work, lockless_work);
-	queued = queue_work(crash_wq, work);
-	printk("queued -> %d\n", queued);
-
-}
-
-EXPORT_SYMBOL(lockless_crash_update_fdt);
 
 /**
- * update_crash_fdt - updates the cpus node of the crash FDT.
+ * crash_fdt_deferred_update - queue a deferred FDT update for CPU hotplug.
  *
- * @image: a pointer to kexec_crash_image
+ * Called from arch_crash_handle_hotplug_event() on the DLPAR notifier path.
+ * Returns immediately without taking any lock.  The ordered workqueue
+ * serialises concurrent events and the crash shutdown path flushes it
+ * before jumping.
  */
-static void update_crash_fdt(struct kimage *image)
+static void crash_fdt_deferred_update(void)
 {
-	void *fdt;
-	int fdt_index;
+	struct work_struct *work;
 
-	fdt_index = get_fdt_index(image);
-	if (fdt_index < 0) {
-		pr_err("Unable to locate FDT segment.\n");
+	if (!crash_fdt_wq)
+		return;
+
+	work = kmalloc(sizeof(*work), GFP_KERNEL);
+	if (!work) {
+		pr_err("crash_fdt: failed to allocate work item, kdump FDT may be stale\n");
 		return;
 	}
-
-	fdt = __va((void *)image->segment[fdt_index].mem);
-
-	/* Temporarily invalidate the crash image while it is replaced */
-	xchg(&kexec_crash_image, NULL);
-
-	/* update FDT to reflect changes in CPU resources */
-	if (update_cpus_node(fdt))
-		pr_err("Failed to update crash FDT");
-
-	/* The crash image is now valid once again */
-	xchg(&kexec_crash_image, image);
+	INIT_WORK(work, crash_fdt_deferred_work);
+	queue_work(crash_fdt_wq, work);
 }
+
+/**
+ * crash_fdt_buf_init - initialise the deferred-update workqueue and buffers.
+ *
+ * Called once at boot via arch_initcall.  Must run after the workqueue
+ * subsystem is up.  Buffer memory is allocated here; fdt_buf.size is
+ * filled in lazily on the first hotplug event from the live segment memsz.
+ */
+static int __init crash_fdt_buf_init(void)
+{
+	fdt_buf.inuse = -1;
+	fdt_buf.size  = 0;
+	fdt_buf.buf[0] = NULL;
+	fdt_buf.buf[1] = NULL;
+	crash_fdt_wq = alloc_ordered_workqueue("crash_fdt_wq", 0);
+	if (!crash_fdt_wq)
+		pr_err("crash_fdt: failed to create workqueue\n");
+	return 0;
+}
+arch_initcall(crash_fdt_buf_init);
 
 int arch_crash_hotplug_support(struct kimage *image, unsigned long kexec_flags)
 {
@@ -720,34 +758,56 @@ int arch_crash_hotplug_support(struct kimage *image, unsigned long kexec_flags)
 }
 
 /**
- * arch_crash_handle_hotplug_event - Handle crash CPU/Memory hotplug events to update the
- *				     necessary kexec segments based on the hotplug event.
+ * arch_crash_handle_hotplug_event - Handle crash CPU/Memory hotplug events.
  * @image: a pointer to kexec_crash_image
- * @arg: struct memory_notify handler for memory hotplug case and NULL for CPU hotplug case.
+ * @arg: struct memory_notify handler for memory hotplug; NULL for CPU hotplug.
  *
- * Update the kdump image based on the type of hotplug event, represented by image->hp_action.
- * CPU add: Update the FDT segment to include the newly added CPU.
- * CPU remove: No action is needed, with the assumption that it's okay to have offline CPUs
- *	       part of the FDT.
- * Memory add/remove: No action is taken as this is not yet supported.
+ * CPU add: queue a deferred FDT update via the ordered crash_fdt_wq.
+ *          The crash shutdown path flushes the queue and copies the latest
+ *          buffer into the kexec segment before jumping.
+ * CPU remove: no FDT action — offline CPUs in the FDT are harmless.
+ * Memory add/remove: update elfcorehdr in place (called under kexec_lock).
  */
 void arch_crash_handle_hotplug_event(struct kimage *image, void *arg)
 {
-	struct memory_notify *mn;
-
 	switch (image->hp_action) {
 	case KEXEC_CRASH_HP_REMOVE_CPU:
 		return;
 
 	case KEXEC_CRASH_HP_ADD_CPU:
-		update_crash_fdt(image);
+		/*
+		 * Allocate the FDT buffers on the first CPU-add event so we
+		 * know the real segment size.  Safe here because we are on
+		 * the DLPAR notifier path (process context, GFP_KERNEL ok).
+		 */
+		if (!fdt_buf.buf[0]) {
+			int idx = get_fdt_index(image);
+
+			if (idx < 0) {
+				pr_err("crash hp: FDT segment not found\n");
+				return;
+			}
+			fdt_buf.size = image->segment[idx].memsz;
+			fdt_buf.buf[0] = kmalloc(fdt_buf.size, GFP_KERNEL);
+			fdt_buf.buf[1] = kmalloc(fdt_buf.size, GFP_KERNEL);
+			if (!fdt_buf.buf[0] || !fdt_buf.buf[1]) {
+				pr_err("crash hp: failed to allocate FDT buffers\n");
+				kfree(fdt_buf.buf[0]);
+				kfree(fdt_buf.buf[1]);
+				fdt_buf.buf[0] = fdt_buf.buf[1] = NULL;
+				return;
+			}
+		}
+		crash_fdt_deferred_update();
 		break;
 
 	case KEXEC_CRASH_HP_REMOVE_MEMORY:
-	case KEXEC_CRASH_HP_ADD_MEMORY:
-		mn = (struct memory_notify *)arg;
+	case KEXEC_CRASH_HP_ADD_MEMORY: {
+		struct memory_notify *mn = (struct memory_notify *)arg;
+
 		update_crash_elfcorehdr(image, mn);
-		return;
+		break;
+	}
 	default:
 		pr_warn_once("Unknown hotplug action\n");
 	}

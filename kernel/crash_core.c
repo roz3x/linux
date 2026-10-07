@@ -548,7 +548,6 @@ int crash_check_hotplug_support(void)
 	return rc;
 }
 
-void lockless_crash_update_fdt(void);
 /*
  * To accurately reflect hot un/plug changes of CPU and Memory resources
  * (including onling and offlining of those resources), the relevant
@@ -569,26 +568,51 @@ void lockless_crash_update_fdt(void);
  * NR_CPUS_DEFAULT and CRASH_MAX_MEMORY_RANGES. The elfcorehdr is
  * excluded from SHA verification by default if the architecture
  * supports crash hotplug.
+ *
+ * CPU hotplug events are dispatched directly to arch_crash_handle_hotplug_event()
+ * without taking crash_hotplug_lock or kexec_lock, to avoid stalling the
+ * DLPAR notifier call chain.  The arch handler is responsible for its own
+ * synchronisation (e.g. an ordered workqueue) and must commit any pending
+ * update into the kexec segment before the kexec jump fires.
+ *
+ * Memory hotplug events write directly into the elfcorehdr segment and
+ * must hold crash_hotplug_lock + kexec_lock to serialise against a
+ * concurrent kexec_load/unload.
  */
 static void crash_handle_hotplug_event(unsigned int hp_action, unsigned int cpu, void *arg)
 {
 	struct kimage *image;
 
-	/* Check kdump is not loaded */
-	if (!kexec_crash_image)
+	/*
+	 * CPU hotplug: hand off to the arch without acquiring any lock.
+	 * hotplug_support is set once before the image is published and
+	 * never changed while the image is live, so a READ_ONCE snapshot
+	 * of kexec_crash_image is sufficient — no lock needed for this check.
+	 */
+	if (hp_action == KEXEC_CRASH_HP_ADD_CPU ||
+	    hp_action == KEXEC_CRASH_HP_REMOVE_CPU) {
+		image = READ_ONCE(kexec_crash_image);
+		if (!image || !image->hotplug_support)
+			return;
+		pr_debug("hp_action %u, cpu %u\n", hp_action, cpu);
+		/*
+		 * hp_action is read by arch_crash_handle_hotplug_event via
+		 * image->hp_action.  Set it before the call and clear it
+		 * after so the arch handler has the correct context even
+		 * though we hold no lock here.  The ordered workqueue inside
+		 * the arch handler serialises concurrent CPU-add events.
+		 */
+		image->hp_action = hp_action;
+		arch_crash_handle_hotplug_event(image, arg);
+		image->hp_action = KEXEC_CRASH_HP_NONE;
 		return;
+	}
 
-	/* Check that kexec segments update is permitted */
-	if (!image->hotplug_support)
-		return;
-
-
-	/* we want a lock less version here */
-	lockless_crash_update_fdt();
-	return;
-	
+	/*
+	 * Memory hotplug: updates the elfcorehdr segment in place, so it
+	 * must serialise with crash_hotplug_lock and kexec_lock.
+	 */
 	crash_hotplug_lock();
-	/* Obtain lock while changing crash information */
 	if (!kexec_trylock()) {
 		if (!kexec_in_progress)
 			pr_info("kexec_trylock() failed, kdump image may be inaccurate\n");
@@ -596,13 +620,17 @@ static void crash_handle_hotplug_event(unsigned int hp_action, unsigned int cpu,
 		return;
 	}
 
+	/* Check kdump is loaded */
+	if (!kexec_crash_image)
+		goto out;
+
 	image = kexec_crash_image;
 
-	if (hp_action == KEXEC_CRASH_HP_ADD_CPU ||
-		hp_action == KEXEC_CRASH_HP_REMOVE_CPU)
-		pr_debug("hp_action %u, cpu %u\n", hp_action, cpu);
-	else
-		pr_debug("hp_action %u\n", hp_action);
+	/* Check that kexec segments update is permitted */
+	if (!image->hotplug_support)
+		goto out;
+
+	pr_debug("hp_action %u\n", hp_action);
 
 	/*
 	 * The elfcorehdr_index is set to -1 when the struct kimage
