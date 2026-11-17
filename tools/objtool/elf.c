@@ -522,6 +522,13 @@ static int elf_add_symbol(struct elf *elf, struct symbol *sym)
 		elf->num_files++;
 
 	sym->offset = sym->sym.st_value;
+
+	/*
+	 * Already-linked objects have absolute symbol values; objtool works
+	 * with section-relative offsets.  sh_addr is 0 for relocatable objects.
+	 */
+	if (sym->sec->sh.sh_addr && sym->offset >= sym->sec->sh.sh_addr)
+		sym->offset -= sym->sec->sh.sh_addr;
 	sym->len = sym->sym.st_size;
 
 	__sym_for_each(iter, &sym->sec->symbol_tree, sym->offset, sym->offset) {
@@ -1243,6 +1250,13 @@ struct elf *elf_open_read(const char *name, int flags)
 		ERROR_ELF("gelf_getehdr");
 		goto err;
 	}
+
+	/*
+	 * A linked object has a layout fixed by the linker (segments etc.);
+	 * don't let libelf rearrange it when writing back.
+	 */
+	if (elf->ehdr.e_type != ET_REL)
+		elf_flagelf(elf->elf, ELF_C_SET, ELF_F_LAYOUT);
 
 	if (read_sections(elf))
 		goto err;

@@ -3,7 +3,8 @@
 #include <objtool/special.h>
 #include <objtool/warn.h>
 
-bool arch_support_alt_relocation(struct special_alt *special_alt,
+bool arch_support_alt_relocation(struct objtool_file *file,
+				 struct special_alt *special_alt,
 				 struct instruction *insn,
 				 struct reloc *reloc)
 {
