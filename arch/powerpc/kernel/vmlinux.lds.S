@@ -99,8 +99,12 @@ SECTIONS
 	.text : AT(ADDR(.text) - LOAD_OFFSET) {
 		ALIGN_FUNCTION();
 #endif
+#ifdef CONFIG_HAVE_OBJTOOL_ALT_FIXUP
+		*(.text.hot .text.hot.* TEXT_MAIN .text.fixup .text.unlikely .text.unlikely.* .fixup .ref.text);
+#else
 		/* careful! __ftr_alt_* sections need to be close to .text */
 		*(.text.hot .text.hot.* TEXT_MAIN .text.fixup .text.unlikely .text.unlikely.* .fixup __ftr_alt_* .ref.text);
+#endif
 		*(.tramp.ftrace.text);
 		NOINSTR_TEXT
 		SCHED_TEXT
@@ -266,6 +270,17 @@ SECTIONS
 		. = ALIGN(PAGE_SIZE);
 		_einittext = .;
 	} :text
+
+#ifdef CONFIG_HAVE_OBJTOOL_ALT_FIXUP
+	/*
+	 * Feature fixup replacement code is only used at boot as the source of
+	 * the code copied over the original; objtool fixes up its branches for
+	 * where they end up.  It can be anywhere.
+	 */
+	.__ftr_alternates.text : AT(ADDR(.__ftr_alternates.text) - LOAD_OFFSET) {
+		*(__ftr_alt_*);
+	}
+#endif
 
 	/* .exit.text is discarded at runtime, not link time,
 	 * to deal with references from __bug_table

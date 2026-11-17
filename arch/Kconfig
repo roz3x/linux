@@ -1413,6 +1413,13 @@ config ARCH_WANT_DEFAULT_TOPDOWN_MMAP_LAYOUT
 config HAVE_OBJTOOL
 	bool
 
+config HAVE_OBJTOOL_ALT_FIXUP
+	bool
+	help
+	  Architecture's alternative replacement code is copied over the
+	  original code at runtime without translating its pc-relative
+	  references; objtool (--alt-fixup) does that to the linked vmlinux.
+
 config HAVE_JUMP_LABEL_HACK
 	bool
 

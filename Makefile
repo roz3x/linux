@@ -1562,7 +1562,7 @@ vdso_install:
 # ---------------------------------------------------------------------------
 # Tools
 
-ifdef CONFIG_OBJTOOL
+ifneq ($(CONFIG_OBJTOOL)$(CONFIG_HAVE_OBJTOOL_ALT_FIXUP),)
 prepare: tools/objtool
 endif
 

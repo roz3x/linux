@@ -57,6 +57,11 @@ void __weak arch_handle_alternative(struct special_alt *alt)
 {
 }
 
+int __weak arch_special_get_alts(struct elf *elf, struct list_head *alts)
+{
+	return 0;
+}
+
 static void reloc_to_sec_off(struct reloc *reloc, struct section **sec,
 			     unsigned long *off)
 {
@@ -137,6 +142,9 @@ int special_get_alts(struct elf *elf, struct list_head *alts)
 	int idx;
 
 	INIT_LIST_HEAD(alts);
+
+	if (opts.alt_fixup)
+		return arch_special_get_alts(elf, alts);
 
 	for (entry = entries; entry->sec; entry++) {
 		sec = find_section_by_name(elf, entry->sec);

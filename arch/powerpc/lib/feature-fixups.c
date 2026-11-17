@@ -51,14 +51,21 @@ static u32 *calc_addr(struct fixup_entry *fcur, long offset)
 	return (u32 *)((unsigned long)fcur + offset);
 }
 
-static int patch_alt_instruction(u32 *src, u32 *dest, u32 *alt_start, u32 *alt_end)
+/*
+ * Relative branches in the alternative code of the core kernel have been
+ * fixed up for where they get copied to at build time, by objtool
+ * (--alt-fixup).  Modules and the vdso are not post processed, translate their
+ * branches here.
+ */
+static int patch_alt_instruction(u32 *src, u32 *dest, u32 *alt_start,
+				 u32 *alt_end, bool translate)
 {
 	int err;
 	ppc_inst_t instr;
 
 	instr = ppc_inst_read(src);
 
-	if (instr_is_relative_branch(ppc_inst_read(src))) {
+	if (translate && instr_is_relative_branch(ppc_inst_read(src))) {
 		u32 *target = (u32 *)branch_target(src);
 
 		/* Branch within the section doesn't need translating */
@@ -75,7 +82,7 @@ static int patch_alt_instruction(u32 *src, u32 *dest, u32 *alt_start, u32 *alt_e
 }
 
 static int patch_feature_section_mask(unsigned long value, unsigned long mask,
-				      struct fixup_entry *fcur)
+				      struct fixup_entry *fcur, bool translate)
 {
 	u32 *start, *end, *alt_start, *alt_end, *src, *dest;
 
@@ -95,7 +102,7 @@ static int patch_feature_section_mask(unsigned long value, unsigned long mask,
 
 	for (; src < alt_end; src = ppc_inst_next(src, src),
 			      dest = ppc_inst_next(dest, dest)) {
-		if (patch_alt_instruction(src, dest, alt_start, alt_end))
+		if (patch_alt_instruction(src, dest, alt_start, alt_end, translate))
 			return 1;
 	}
 
@@ -106,7 +113,8 @@ static int patch_feature_section_mask(unsigned long value, unsigned long mask,
 }
 
 static void do_feature_fixups_mask(unsigned long value, unsigned long mask,
-				   void *fixup_start, void *fixup_end)
+				   void *fixup_start, void *fixup_end,
+				   bool translate)
 {
 	struct fixup_entry *fcur, *fend;
 
@@ -114,7 +122,7 @@ static void do_feature_fixups_mask(unsigned long value, unsigned long mask,
 	fend = fixup_end;
 
 	for (; fcur < fend; fcur++) {
-		if (patch_feature_section_mask(value, mask, fcur)) {
+		if (patch_feature_section_mask(value, mask, fcur, translate)) {
 			WARN_ON(1);
 			printk("Unable to patch feature section at %p - %p" \
 				" with %p - %p\n",
@@ -128,7 +136,7 @@ static void do_feature_fixups_mask(unsigned long value, unsigned long mask,
 
 void do_feature_fixups(unsigned long value, void *fixup_start, void *fixup_end)
 {
-	do_feature_fixups_mask(value, ~0, fixup_start, fixup_end);
+	do_feature_fixups_mask(value, ~0, fixup_start, fixup_end, true);
 }
 
 #ifdef CONFIG_PPC_BARRIER_NOSPEC
@@ -637,6 +645,7 @@ static unsigned long __initdata saved_firmware_features;
 void __init apply_feature_fixups(void)
 {
 	struct cpu_spec *spec = PTRRELOC(*PTRRELOC(&cur_cpu_spec));
+	bool translate = !IS_ENABLED(CONFIG_HAVE_OBJTOOL_ALT_FIXUP);
 
 	*PTRRELOC(&saved_cpu_features) = spec->cpu_features;
 	*PTRRELOC(&saved_mmu_features) = spec->mmu_features;
@@ -645,13 +654,13 @@ void __init apply_feature_fixups(void)
 	 * Apply the CPU-specific and firmware specific fixups to kernel text
 	 * (nop out sections not relevant to this CPU or this firmware).
 	 */
-	do_feature_fixups(spec->cpu_features,
-			  PTRRELOC(&__start___ftr_fixup),
-			  PTRRELOC(&__stop___ftr_fixup));
+	do_feature_fixups_mask(spec->cpu_features, ~0,
+			       PTRRELOC(&__start___ftr_fixup),
+			       PTRRELOC(&__stop___ftr_fixup), translate);
 
-	do_feature_fixups(spec->mmu_features,
-			  PTRRELOC(&__start___mmu_ftr_fixup),
-			  PTRRELOC(&__stop___mmu_ftr_fixup));
+	do_feature_fixups_mask(spec->mmu_features, ~0,
+			       PTRRELOC(&__start___mmu_ftr_fixup),
+			       PTRRELOC(&__stop___mmu_ftr_fixup), translate);
 
 	do_lwsync_fixups(spec->cpu_features,
 			 PTRRELOC(&__start___lwsync_fixup),
@@ -659,8 +668,9 @@ void __init apply_feature_fixups(void)
 
 #ifdef CONFIG_PPC64
 	saved_firmware_features = powerpc_firmware_features;
-	do_feature_fixups(powerpc_firmware_features,
-			  &__start___fw_ftr_fixup, &__stop___fw_ftr_fixup);
+	do_feature_fixups_mask(powerpc_firmware_features, ~0,
+			       &__start___fw_ftr_fixup, &__stop___fw_ftr_fixup,
+			       translate);
 #endif
 	do_final_fixups();
 }
@@ -672,7 +682,8 @@ void __init update_mmu_feature_fixups(unsigned long mask)
 
 	do_feature_fixups_mask(cur_cpu_spec->mmu_features, mask,
 			       PTRRELOC(&__start___mmu_ftr_fixup),
-			       PTRRELOC(&__stop___mmu_ftr_fixup));
+			       PTRRELOC(&__stop___mmu_ftr_fixup),
+			       !IS_ENABLED(CONFIG_HAVE_OBJTOOL_ALT_FIXUP));
 	mmu_feature_keys_init();
 }
 
@@ -711,7 +722,7 @@ late_initcall(check_features);
 
 static int patch_feature_section(unsigned long value, struct fixup_entry *fcur)
 {
-	return patch_feature_section_mask(value, ~0, fcur);
+	return patch_feature_section_mask(value, ~0, fcur, true);
 }
 
 /* This must be after the text it fixes up, vmlinux.lds.S enforces that atm */
