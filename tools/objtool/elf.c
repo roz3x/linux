@@ -522,6 +522,13 @@ static int elf_add_symbol(struct elf *elf, struct symbol *sym)
 		elf->num_files++;
 
 	sym->offset = sym->sym.st_value;
+
+	/*
+	 * Already-linked objects have absolute symbol values; objtool works
+	 * with section-relative offsets.  sh_addr is 0 for relocatable objects.
+	 */
+	if (sym->sec->sh.sh_addr && sym->offset >= sym->sec->sh.sh_addr)
+		sym->offset -= sym->sec->sh.sh_addr;
 	sym->len = sym->sym.st_size;
 
 	__sym_for_each(iter, &sym->sec->symbol_tree, sym->offset, sym->offset) {
