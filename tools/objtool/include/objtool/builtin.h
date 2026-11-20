@@ -9,6 +9,7 @@
 
 struct opts {
 	/* actions: */
+	bool alt_fixup;
 	bool checksum;
 	const char *disas;
 	bool dump_orc;

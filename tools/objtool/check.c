@@ -2598,6 +2598,7 @@ static bool validate_branch_enabled(void)
 static bool alts_needed(void)
 {
 	return validate_branch_enabled()	||
+	       opts.alt_fixup			||
 	       opts.noinstr			||
 	       opts.hack_jump_label		||
 	       opts.disas			||
@@ -2651,6 +2652,10 @@ int decode_file(struct objtool_file *file)
 		if (add_special_section_alts(file))
 			return -1;
 	}
+
+	/* Fixing up the alternatives is all there is to do */
+	if (opts.alt_fixup)
+		return 0;
 
 	if (add_jump_destinations(file))
 		return -1;
