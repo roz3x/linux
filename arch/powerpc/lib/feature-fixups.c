@@ -51,24 +51,18 @@ static u32 *calc_addr(struct fixup_entry *fcur, long offset)
 	return (u32 *)((unsigned long)fcur + offset);
 }
 
-static int patch_alt_instruction(u32 *src, u32 *dest, u32 *alt_start, u32 *alt_end)
+/*
+ * Relative branches in the alternative code of the core kernel have been
+ * fixed up for where they get copied to at build time, by objtool
+ * (--alt-fixup).  Modules and the vdso are not post processed, translate their
+ * branches here.
+ */
+static int patch_alt_instruction(u32 *src, u32 *dest, u32 *alt_start,
+				 u32 *alt_end)
 {
-	int err;
 	ppc_inst_t instr;
 
 	instr = ppc_inst_read(src);
-
-	if (instr_is_relative_branch(ppc_inst_read(src))) {
-		u32 *target = (u32 *)branch_target(src);
-
-		/* Branch within the section doesn't need translating */
-		if (target < alt_start || target > alt_end) {
-			err = translate_branch(&instr, dest, src);
-			if (err)
-				return 1;
-		}
-	}
-
 	raw_patch_instruction(dest, instr);
 
 	return 0;
