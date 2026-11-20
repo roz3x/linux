@@ -102,11 +102,7 @@ unsigned long arch_jump_destination(struct instruction *insn)
 
 bool arch_pc_relative_reloc(struct reloc *reloc)
 {
-	/*
-	 * The powerpc build only allows certain relocation types, see
-	 * relocs_check.sh, and none of those accepted are PC relative.
-	 */
-	return false;
+	return reloc_type(reloc) == R_PPC_REL24 || reloc_type(reloc) == R_PPC_REL14;
 }
 
 void arch_initial_func_cfi_state(struct cfi_init_state *state)
