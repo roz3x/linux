@@ -1828,7 +1828,7 @@ static int handle_group_alt(struct objtool_file *file,
 		 */
 		alt_reloc = insn_reloc(file, insn);
 		if (alt_reloc && arch_pc_relative_reloc(alt_reloc) &&
-		    !arch_support_alt_relocation(special_alt, insn, alt_reloc)) {
+		    !arch_support_alt_relocation(file, special_alt, insn, alt_reloc)) {
 
 			ERROR_INSN(insn, "unsupported relocation in alternatives section");
 			return -1;

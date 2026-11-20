@@ -39,7 +39,8 @@ void arch_handle_alternative(struct special_alt *alt);
  */
 bool arch_alt_ignore_new_reloc(struct section *sec, unsigned long offset);
 
-bool arch_support_alt_relocation(struct special_alt *special_alt,
+bool arch_support_alt_relocation(struct objtool_file *file,
+				 struct special_alt *special_alt,
 				 struct instruction *insn,
 				 struct reloc *reloc);
 struct reloc *arch_find_switch_table(struct objtool_file *file,
