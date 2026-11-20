@@ -1251,6 +1251,13 @@ struct elf *elf_open_read(const char *name, int flags)
 		goto err;
 	}
 
+	/*
+	 * A linked object has a layout fixed by the linker (segments etc.);
+	 * don't let libelf rearrange it when writing back.
+	 */
+	if (elf->ehdr.e_type != ET_REL)
+		elf_flagelf(elf->elf, ELF_C_SET, ELF_F_LAYOUT);
+
 	if (read_sections(elf))
 		goto err;
 
