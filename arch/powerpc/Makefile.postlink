@@ -43,6 +43,12 @@ ifndef CONFIG_PPC64_ELF_ABI_V1
 endif
 endif
 
+vmlinux.unstripped: FORCE
+ifdef CONFIG_PPC64
+	# Fix branches in __ftr_fixup segment, with help of objtool
+	$(objtree)/tools/objtool/objtool --alt-fixup --link "$@"
+endif
+
 clean:
 	rm -f .tmp_symbols.txt
 
