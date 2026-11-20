@@ -1251,6 +1251,9 @@ struct elf *elf_open_read(const char *name, int flags)
 		goto err;
 	}
 
+	if (elf->ehdr.e_type != ET_REL)
+		elf_flagelf(elf->elf, ELF_C_SET, ELF_F_LAYOUT);
+
 	if (read_sections(elf))
 		goto err;
 
