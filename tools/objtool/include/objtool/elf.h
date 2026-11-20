@@ -396,14 +396,24 @@ static inline unsigned long sec_size(struct section *sec)
 		((Elf64_Rela *)reloc_rel(reloc))->field = val;		\
 })
 
+/*
+ * Relocation offsets in linked objects are absolute addresses; present them
+ * as offsets into the relocated section like in relocatable objects (where
+ * sh_addr is 0).
+ */
+static inline u64 reloc_base_addr(struct reloc *reloc)
+{
+	return reloc->sec->base ? reloc->sec->base->sh.sh_addr : 0;
+}
+
 static inline u64 reloc_offset(struct reloc *reloc)
 {
-	return __get_reloc_field(reloc, r_offset);
+	return __get_reloc_field(reloc, r_offset) - reloc_base_addr(reloc);
 }
 
 static inline void set_reloc_offset(struct elf *elf, struct reloc *reloc, u64 offset)
 {
-	__set_reloc_field(reloc, r_offset, offset);
+	__set_reloc_field(reloc, r_offset, offset + reloc_base_addr(reloc));
 	mark_sec_changed(elf, reloc->sec, true);
 }
 
