@@ -34,6 +34,19 @@ struct special_entry {
 	unsigned char orig_end, new_end;
 };
 
+/* powerpc feature fixups, see arch/powerpc/include/asm/feature-fixups.h */
+#define FTR_FIXUP_ENTRY(name)			\
+	{					\
+		.sec = name,			\
+		.group = true,			\
+		.size = FTR_ENTRY_SIZE,		\
+		.orig = FTR_ORIG_OFFSET,	\
+		.new = FTR_NEW_OFFSET,		\
+		.fixup = true,			\
+		.orig_end = FTR_ORIG_END_OFFSET,\
+		.new_end = FTR_NEW_END_OFFSET,	\
+	}
+
 static const struct special_entry entries[] = {
 	{
 		.sec = ".altinstructions",
@@ -59,6 +72,11 @@ static const struct special_entry entries[] = {
 		.orig = EX_ORIG_OFFSET,
 		.new = EX_NEW_OFFSET,
 	},
+#ifdef FTR_ENTRY_SIZE
+	FTR_FIXUP_ENTRY("__ftr_fixup"),
+	FTR_FIXUP_ENTRY("__mmu_ftr_fixup"),
+	FTR_FIXUP_ENTRY("__fw_ftr_fixup"),
+#endif
 	{},
 };
 
