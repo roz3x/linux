@@ -44,7 +44,7 @@ endif
 endif
 
 vmlinux.unstripped: FORCE
-ifdef CONFIG_PPC64
+ifeq ($(CONFIG_PPC64)$(CONFIG_BOOK3S),yy)
 	# Fix branches in __ftr_fixup segment, with help of objtool
 	$(objtree)/tools/objtool/objtool --alt-fixup --link "$@"
 endif
