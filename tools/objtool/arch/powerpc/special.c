@@ -5,6 +5,10 @@
 #include <objtool/builtin.h>
 #include <objtool/warn.h>
 
+#include <asm/text-patching.h>
+#include <asm/inst.h>
+
+#include "../../../arch/powerpc/lib/code-patching-branch.c"
 
 /*
  * Where each replacement code is linked and where it is copied to.  Feature
@@ -37,12 +41,76 @@ void arch_handle_alternative(struct special_alt *alt)
 	};
 }
 
+/*
+ * Replacement code can contain feature sections itself: that inner code ends
+ * up in the outer one's replacement code, which in turn ends up in the
+ * original code.  Find where @addr, in or referred to by the replacement code
+ * starting at @self, finally is.
+ */
+static u64 final_addr(u64 self, u64 addr)
+{
+	int i;
+
+	for (i = 0; i < nr_ftr_alts; i++) {
+		struct ftr_alt *a = &ftr_alts[i];
+
+		if (a->alt != self && addr >= a->alt && addr < a->alt + a->len) {
+			addr = a->orig + addr - a->alt;
+			i = -1;
+		}
+	}
+
+	return addr;
+}
+
+/*
+ * The linker resolved the branch in the replacement code as if it was executed
+ * where it's linked, but it's going to be executed where it is copied to;
+ * encode the displacement from there.
+ */
 bool arch_support_alt_relocation(struct objtool_file *file,
 				 struct special_alt *special_alt,
 				 struct instruction *insn,
 				 struct reloc *reloc)
 {
-	exit(-1);
+	struct elf *elf = file->elf;
+	u64 alt = special_alt->new_sec->sh.sh_addr + special_alt->new_off;
+	u64 orig = special_alt->orig_sec->sh.sh_addr + special_alt->orig_off;
+	u64 insn_addr = insn->sec->sh.sh_addr + insn->offset;
+	struct symbol *sym = reloc->sym;
+	u64 target = sym->sym.st_value + reloc_addend(reloc);
+	u64 dest;
+	u32 *word = insn->sec->data->d_buf + insn->offset;
+	u32 val = bswap_if_needed(elf, *word);
+	ppc_inst_t instr = ppc_inst(val);
+	int err;
+
+	/* The linker points direct calls to the local entry point */
+	if (is_func_sym(sym))
+		target += PPC64_LOCAL_ENTRY_OFFSET(sym->sym.st_other);
+
+	/* Within the replacement code nothing changes by moving it */
+	if (target >= alt && target <= alt + special_alt->new_len)
+		return true;
+
+	target = final_addr(alt, target);
+	dest = final_addr(alt, orig + insn_addr - alt);
+
+	if (instr_is_branch_iform(instr))
+		err = create_branch(&instr, (const u32 *)dest, target, ppc_inst_val(instr));
+	else if (instr_is_branch_bform(instr))
+		err = create_cond_branch(&instr, (const u32 *)dest, target, ppc_inst_val(instr));
+	else
+		err = 1;
+
+	if (err) {
+		ERROR_INSN(insn, "alternative branch out of range");
+		return false;
+	}
+
+	val = bswap_if_needed(elf, ppc_inst_val(instr));
+	return !elf_write_insn(elf, insn->sec, insn->offset, sizeof(val),
+			       (const char *)&val);
 }
 
 struct reloc *arch_find_switch_table(struct objtool_file *file,
