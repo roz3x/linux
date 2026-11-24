@@ -157,7 +157,10 @@ static inline int instr_is_branch_bform(ppc_inst_t instr)
 int instr_is_relative_branch(ppc_inst_t instr);
 int instr_is_relative_link_branch(ppc_inst_t instr);
 unsigned long branch_target(const u32 *instr);
+unsigned long branch_target_at(const u32 *instr, unsigned long pc);
 int translate_branch(ppc_inst_t *instr, const u32 *dest, const u32 *src);
+int translate_branch_at(ppc_inst_t *instr, unsigned long dest,
+			const u32 *src, unsigned long src_addr);
 bool is_conditional_branch(ppc_inst_t instr);
 
 #define OP_RT_RA_MASK	0xffff0000UL
