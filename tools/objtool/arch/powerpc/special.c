@@ -47,21 +47,45 @@ void arch_handle_alternative(struct special_alt *alt)
  * original code.  Find where @addr, in or referred to by the replacement code
  * starting at @self, finally is.
  */
-static u64 final_addr(u64 self, u64 addr)
-{
-	int i;
+// static u64 final_addr(u64 self, u64 addr)
+// {
+// 	int i;
 
-	for (i = 0; i < nr_ftr_alts; i++) {
-		struct ftr_alt *a = &ftr_alts[i];
+// 	for (i = 0; i < nr_ftr_alts; i++) {
+// 		struct ftr_alt *a = &ftr_alts[i];
 
-		if (a->alt != self && addr >= a->alt && addr < a->alt + a->len) {
-			addr = a->orig + addr - a->alt;
-			i = -1;
-		}
-	}
+// 		if (a->alt != self && addr >= a->alt && addr < a->alt + a->len) {
+// 			addr = a->orig + addr - a->alt;
+// 			i = -1;
+// 		}
+// 	}
 
-	return addr;
-}
+// 	return addr;
+// }
+
+
+/*
+ * Find where @addr finally lives after boot-time patching.
+ * If @addr is inside some replacement block (other than @self, which the
+ * caller handles), it will be copied to that block's original location.
+ * Otherwise it does not move.
+ * Assumes alternatives never nest, so one translation is enough.
+ */
+// static u64 final_addr1(u64 self, u64 addr)
+// {
+// 	int i;
+
+// 	for (i = 0; i < nr_ftr_alts; i++) {
+// 		struct ftr_alt *a = &ftr_alts[i];
+
+// 		if (a->alt != self && addr >= a->alt && addr < a->alt + a->len) {
+// 			printf("for address : %lx, wer return %lx\n", addr, a->orig + (addr - a->alt));
+// 			return a->orig + (addr - a->alt);
+// 		}
+// 	}
+// 	printf("are we always just returning from here?\n");
+// 	return addr;
+// }
 
 /*
  * The linker resolved the branch in the replacement code as if it was executed
@@ -90,12 +114,13 @@ bool arch_support_alt_relocation(struct objtool_file *file,
 		target += PPC64_LOCAL_ENTRY_OFFSET(sym->sym.st_other);
 
 	/* Within the replacement code nothing changes by moving it */
-	if (target >= alt && target <= alt + special_alt->new_len)
-		return true;
+	// if (target >= alt && target <= alt + special_alt->new_len)
+	// 	return true;
 
-	target = final_addr(alt, target);
-	dest = final_addr(alt, orig + insn_addr - alt);
-
+	// target = final_addr1(alt, target);
+	// dest = final_addr1(alt, orig + insn_addr - alt);
+	dest = orig + insn_addr - alt;
+printf("patching sym %s\n", sym->name);
 	if (instr_is_branch_iform(instr))
 		err = create_branch(&instr, (const u32 *)dest, target, ppc_inst_val(instr));
 	else if (instr_is_branch_bform(instr))
