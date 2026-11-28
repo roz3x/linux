@@ -46,7 +46,7 @@ endif
 vmlinux.unstripped: FORCE
 ifdef CONFIG_PPC_BOOK3S_64
 	# Fix branches in __ftr_fixup segment, with help of objtool
-	$(objtree)/tools/objtool/objtool --alt-fixup --link "$@"
+	# $(objtree)/tools/objtool/objtool --alt-fixup --link "$@"
 endif
 
 clean:

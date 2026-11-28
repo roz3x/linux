@@ -11,83 +11,6 @@
 #include "../../../arch/powerpc/lib/code-patching-branch.c"
 
 /*
- * Where each replacement code is linked and where it is copied to.  Feature
- * sections can be nested, so this is needed to tell where a replacement
- * finally ends up, see final_addr().
- */
-struct ftr_alt {
-	u64 orig, alt, len;
-};
-
-static struct ftr_alt *ftr_alts;
-static int nr_ftr_alts;
-
-void arch_handle_alternative(struct special_alt *alt)
-{
-	/* Nothing to copy, the original is just nopped */
-	if (!alt->new_len)
-		return;
-
-	ftr_alts = realloc(ftr_alts, (nr_ftr_alts + 1) * sizeof(*ftr_alts));
-	if (!ftr_alts) {
-		ERROR_GLIBC("realloc");
-		exit(1);
-	}
-
-	ftr_alts[nr_ftr_alts++] = (struct ftr_alt){
-		alt->orig_sec->sh.sh_addr + alt->orig_off,
-		alt->new_sec->sh.sh_addr + alt->new_off,
-		alt->new_len,
-	};
-}
-
-/*
- * Replacement code can contain feature sections itself: that inner code ends
- * up in the outer one's replacement code, which in turn ends up in the
- * original code.  Find where @addr, in or referred to by the replacement code
- * starting at @self, finally is.
- */
-// static u64 final_addr(u64 self, u64 addr)
-// {
-// 	int i;
-
-// 	for (i = 0; i < nr_ftr_alts; i++) {
-// 		struct ftr_alt *a = &ftr_alts[i];
-
-// 		if (a->alt != self && addr >= a->alt && addr < a->alt + a->len) {
-// 			addr = a->orig + addr - a->alt;
-// 			i = -1;
-// 		}
-// 	}
-
-// 	return addr;
-// }
-
-
-/*
- * Find where @addr finally lives after boot-time patching.
- * If @addr is inside some replacement block (other than @self, which the
- * caller handles), it will be copied to that block's original location.
- * Otherwise it does not move.
- * Assumes alternatives never nest, so one translation is enough.
- */
-// static u64 final_addr1(u64 self, u64 addr)
-// {
-// 	int i;
-
-// 	for (i = 0; i < nr_ftr_alts; i++) {
-// 		struct ftr_alt *a = &ftr_alts[i];
-
-// 		if (a->alt != self && addr >= a->alt && addr < a->alt + a->len) {
-// 			printf("for address : %lx, wer return %lx\n", addr, a->orig + (addr - a->alt));
-// 			return a->orig + (addr - a->alt);
-// 		}
-// 	}
-// 	printf("are we always just returning from here?\n");
-// 	return addr;
-// }
-
-/*
  * The linker resolved the branch in the replacement code as if it was executed
  * where it's linked, but it's going to be executed where it is copied to;
  * encode the displacement from there.
@@ -113,14 +36,7 @@ bool arch_support_alt_relocation(struct objtool_file *file,
 	if (is_func_sym(sym))
 		target += PPC64_LOCAL_ENTRY_OFFSET(sym->sym.st_other);
 
-	/* Within the replacement code nothing changes by moving it */
-	// if (target >= alt && target <= alt + special_alt->new_len)
-	// 	return true;
-
-	// target = final_addr1(alt, target);
-	// dest = final_addr1(alt, orig + insn_addr - alt);
 	dest = orig + insn_addr - alt;
-printf("patching sym %s\n", sym->name);
 	if (instr_is_branch_iform(instr))
 		err = create_branch(&instr, (const u32 *)dest, target, ppc_inst_val(instr));
 	else if (instr_is_branch_bform(instr))

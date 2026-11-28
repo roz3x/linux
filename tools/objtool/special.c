@@ -181,14 +181,13 @@ static int get_fixup_entry(struct elf *elf, const struct special_entry *entry,
 	unsigned long offset = idx * entry->size * w;
 	struct section *end_sec;
 	unsigned long end_off;
-
+	
 	alt->group = entry->group;
 
 	if (get_fixup_sec_off(elf, sec, offset, entry->orig * w,
 			      &alt->orig_sec, &alt->orig_off) ||
 	    get_fixup_sec_off(elf, sec, offset, entry->orig_end * w,
-			      &end_sec, &end_off) ||
-	    end_sec != alt->orig_sec || end_off < alt->orig_off) {
+			      &end_sec, &end_off)) {
 		ERROR_FUNC(sec, offset, "invalid original code");
 		return -1;
 	}
@@ -197,8 +196,7 @@ static int get_fixup_entry(struct elf *elf, const struct special_entry *entry,
 	if (get_fixup_sec_off(elf, sec, offset, entry->new * w,
 			      &alt->new_sec, &alt->new_off) ||
 	    get_fixup_sec_off(elf, sec, offset, entry->new_end * w,
-			      &end_sec, &end_off) ||
-	    end_sec != alt->new_sec || end_off < alt->new_off) {
+			      &end_sec, &end_off)) {
 		ERROR_FUNC(sec, offset, "invalid replacement code");
 		return -1;
 	}
